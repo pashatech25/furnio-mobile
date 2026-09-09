@@ -1,0 +1,30 @@
+begin;
+insert into public.profiles(id,stripe_customer_id) values('00000000-0000-4000-8000-000000000181','cus_recovery');
+do $$
+declare u uuid:='00000000-0000-4000-8000-000000000181'; item uuid; before_row jsonb; result jsonb;
+begin
+  perform public.test_assert(public.get_stripe_checkout_recovery(u,'SANDBOX') is null,'recovery disabled by default');
+  update private.native_commerce_settings set checkout_protection_enabled=true,customer_compatibility_enabled=true;
+  perform public.test_assert(public.get_stripe_checkout_recovery(u,'SANDBOX') is null,'no intent invents no Stripe session');
+  begin perform public.get_stripe_checkout_recovery(u,'PRODUCTION');raise exception 'cross environment recovery';exception when sqlstate '55000' then null;end;
+  item:=(public.begin_customer_purchase_intent(u,'SANDBOX','STRIPE','20000000-0000-4000-8000-000000000002',gen_random_uuid(),repeat('c',64))->>'intentId')::uuid;
+  perform public.test_assert(public.get_stripe_checkout_recovery(u,'SANDBOX')->>'state'='reserved','reserved intent is visible for offer guard, not proof of launch');
+  perform public.launch_customer_purchase_intent(u,'SANDBOX',item,'STRIPE');
+  select to_jsonb(i) into before_row from private.customer_purchase_intents i where id=item;
+  result:=public.get_stripe_checkout_recovery(u,'SANDBOX');
+  perform public.test_assert(result->>'intentId'=item::text and result->>'customerId'='cus_recovery','exact owned context');
+  perform public.test_assert(result->>'sessionId' is null and result->>'launchedAt' is not null,'lost session response recoverable');
+  perform public.test_assert((select to_jsonb(i) from private.customer_purchase_intents i where id=item)=before_row,'recovery lookup never mutates financial state');
+  perform public.test_assert(public.get_stripe_checkout_recovery('00000000-0000-4000-8000-000000000020','SANDBOX') is null,'another user cannot see checkout');
+  perform public.record_stripe_purchase_intent(u,'SANDBOX',item,'cs_recovered',false);
+  perform public.test_assert(public.get_stripe_checkout_recovery(u,'SANDBOX')->>'sessionId'='cs_recovered','recorded session is returned for direct retrieval');
+  update public.profiles set account_status='suspended' where id=u;
+  begin perform public.get_stripe_checkout_recovery(u,'SANDBOX');raise exception 'suspended recovery';exception when sqlstate '42501' then null;end;
+  update public.profiles set account_status='active' where id=u;
+  perform public.record_stripe_purchase_intent(u,'SANDBOX',item,'cs_recovered',true);
+  perform public.test_assert(public.get_stripe_checkout_recovery(u,'SANDBOX') is null,'verified expired intent no longer blocks');
+  perform public.test_assert(not has_function_privilege('anon','public.get_stripe_checkout_recovery(uuid,text)','EXECUTE'),'anonymous lookup forbidden');
+  perform public.test_assert(not has_function_privilege('authenticated','public.get_stripe_checkout_recovery(uuid,text)','EXECUTE'),'client cannot forge user selector');
+  perform public.test_assert(has_function_privilege('service_role','public.get_stripe_checkout_recovery(uuid,text)','EXECUTE'),'server-only recovery permitted');
+end; $$;
+rollback;

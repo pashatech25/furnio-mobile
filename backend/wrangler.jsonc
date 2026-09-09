@@ -1,0 +1,83 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "furnio-mobile-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+  },
+  "vars": {
+    "ENVIRONMENT": "staging",
+    "MOBILE_ENABLED": "false",
+    "MOBILE_BILLING_READ_ENABLED": "false",
+    "TURNSTILE_SITE_KEY": "",
+    "CHALLENGE_HOSTNAME": "",
+    "NATIVE_RECONCILIATION_ENABLED": "false",
+    "NATIVE_ACQUISITION_ENABLED": "false",
+    "SUPABASE_URL": "",
+    "SUPABASE_PROJECT_REF": "",
+    "REVENUECAT_PROJECT_ID": "",
+    "REVENUECAT_APP_IDS": "",
+    "MOBILE_ACTIVITY_READ_ENABLED": "false",
+    "MOBILE_NOTIFICATIONS_ENABLED": "false",
+    "MOBILE_ACCOUNT_REVIEW_ENABLED": "false",
+    "MOBILE_ACCOUNT_REQUESTS_ENABLED": "false",
+    "MOBILE_ACCOUNT_CLEANUP_ENABLED": "false",
+    "MOBILE_ACCOUNT_AUTH_BLOCK_ENABLED": "false",
+    "EXPO_PROJECT_ID": "",
+  },
+  "secrets": {
+    "required": [
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "REVENUECAT_SECRET_API_KEY",
+      "REVENUECAT_WEBHOOK_AUTHORIZATION",
+      "REVENUECAT_WEBHOOK_SIGNING_SECRET",
+      "EXPO_ACCESS_TOKEN",
+    ],
+  },
+  // Independent notification polling and bounded account cleanup; no imaging Worker trigger.
+  // Flags AND the database setting remain disabled until staging acceptance.
+  "triggers": { "crons": ["* * * * *"] },
+  // Unprovisioned, isolated staging media bucket only. Never point local testing
+  // at the production media bucket. No binding credentials enter the native app.
+  "r2_buckets": [
+    {
+      "binding": "ACCOUNT_MEDIA",
+      "bucket_name": "furnio-media-mobile-staging",
+      "remote": false,
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "NATIVE_EVENTS",
+        "queue": "furnio-mobile-native-events-staging",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "furnio-mobile-native-events-staging",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 10,
+        "retry_delay": 60,
+        "dead_letter_queue": "furnio-mobile-native-events-dlq-staging",
+      },
+    ],
+  },
+  // Deliberately unprovisioned staging target. Replace only after its baseline is recorded.
+  // The queue and its DLQ names are also unprovisioned. No live secret or route is configured.
+  "services": [
+    {
+      "binding": "PLATFORM",
+      "service": "furnio-api-mobile-staging",
+      "remote": false,
+    },
+  ],
+}

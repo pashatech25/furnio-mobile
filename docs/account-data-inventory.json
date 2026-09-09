@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "status": "cleanup_implementation_pending",
+  "automaticDeletionEnabled": false,
+  "warning": "Design inventory only. These groups are not executable deletion or retention rules. Exact columns, foreign keys, JSON payloads, retention grounds and provider copies require full-schema staging validation.",
+  "groups": [
+    {
+      "id": "account_deletion_control",
+      "plannedTreatment": "Preserve the minimum accepted request receipt and confirmation evidence through cleanup and rollback; it must not cascade with Auth deletion. Store only a capability hash, never the raw receipt secret, photos, email or review contents. Auth-block checkpoints retain a lease, observation timestamps and fixed error codes, not Auth response bodies. A verified sign-in ban is not session revocation or completed deletion. Disposal periods for expired/unconfirmed requests and accepted audit evidence require approved retention and an implemented sweep. This journal does not itself delete customer records.",
+      "tables": ["private.mobile_account_deletion_requests", "private.mobile_account_cleanup", "private.mobile_account_media_scopes"]
+    },
+    {
+      "id": "account_identity",
+      "plannedTreatment": "Remove usable account identity and personal profile fields. Preserve only a separately justified financial/audit linkage after retention approval. Revoke all login, developer and admin credentials; do not hard-cascade financial records.",
+      "tables": ["public.profiles", "public.admin_users", "public.api_consumers", "public.api_keys", "public.api_sandbox_keys", "public.developer_program_applications", "public.developer_activation_invitations", "public.developer_application_package_offers", "public.developer_package_offers", "public.phone_verification_reservations", "public.phone_verification_send_events", "public.verified_phone_claims", "public.trial_entitlements", "public.trial_usage_events", "public.trial_upload_reservations"]
+    },
+    {
+      "id": "customer_work_and_delivery",
+      "plannedTreatment": "Quiesce new and in-flight processing, disable outbound deliveries and enumerate media before deleting owned work. Include source documents, masks, temporary renders, output variants, files uploaded but not committed, payloads and device registrations. Do not remove another account's shared data.",
+      "tables": ["public.projects", "public.room_groups", "public.assets", "public.jobs", "public.job_steps", "public.mask_regions", "public.download_events", "public.processing_batches", "public.processing_batch_items", "public.api_upload_sessions", "public.api_job_links", "public.api_idempotency_records", "public.api_request_logs", "public.api_sandbox_request_logs", "public.api_webhook_endpoints", "public.api_webhook_deliveries", "public.api_rate_buckets", "private.mobile_push_devices", "private.mobile_push_deliveries"]
+    },
+    {
+      "id": "financial_and_audit_retention_review",
+      "plannedTreatment": "Field-level retention decision required. Keep legally required payment/refund/accounting and restricted audit evidence, with minimum account linkage and approved expiry. Raw event bodies, actor emails, before/after values, notes and property data are not automatically exempt. Continue handling paid events/refunds without recreating a deleted account.",
+      "tables": ["public.credit_ledger", "public.subscriptions", "public.api_credit_holds", "public.stripe_events", "public.billing_discount_redemptions", "public.referral_attributions", "public.referral_payments", "public.referral_rewards", "public.referral_events", "public.camera_reward_claims", "public.camera_reward_redemptions", "public.camera_admin_audit_log", "public.admin_audit_log", "public.automation_admin_audit_log", "public.consent_events", "public.fal_billing_events", "public.native_subscriptions", "public.native_transactions", "public.native_credit_lots", "private.native_credit_allocations", "private.native_refund_revisions", "public.native_reconciliation_alerts", "public.native_purchase_events", "private.native_purchase_recovery", "private.native_recovery_events", "private.customer_purchase_intents", "private.native_checkout_support_audit", "private.native_checkout_cancellation_checks"]
+    },
+    {
+      "id": "communication_and_automation_personal_data",
+      "plannedTreatment": "Stop scheduled customer sends/runs first. Delete or redact personal data in recipients, payload/context JSON, node summaries, free-text excerpts and secondary logs, including rows associated by email or textual subject rather than a foreign key. Suppression/consent/audit retention needs a specific policy; never treat all automation data as non-personal.",
+      "tables": ["public.referral_accounts", "public.referral_clicks", "public.email_preferences", "public.email_suppressions", "public.email_outbox", "public.email_deliveries", "public.email_unsubscribe_tokens", "public.automation_events", "public.automation_runs", "public.automation_node_attempts", "public.automation_waits", "public.automation_idempotency_claims", "public.automation_webhook_deliveries", "public.automation_audience_observations", "public.ai_invocations", "public.marketing_campaign_recipients"]
+    },
+    {
+      "id": "shared_configuration_not_customer_owned",
+      "plannedTreatment": "Do not delete global business configuration, immutable package definitions or aggregate business stats for one account. Review created_by/updated_by links, customer-targeted coupon fields, textual snapshots and other actor/personal references separately. Aggregate rows are retained only when not identifying the customer.",
+      "tables": ["public.ai_prompt_presets", "public.billing_package_versions", "public.billing_discounts", "public.billing_discount_packages", "public.trial_policies", "public.customer_identity_policies", "public.referral_program_settings", "public.referral_program_packages", "public.referral_stripe_coupons", "public.legal_policy_versions", "public.email_sender_settings", "public.email_templates", "public.email_template_versions", "public.customer_segments", "public.customer_segment_versions", "public.automation_flows", "public.automation_flow_versions", "public.automation_schedules", "public.outbound_destination_allowlist", "public.llm_providers", "public.llm_grounding_policy_versions", "public.marketing_campaigns", "public.marketing_campaign_versions", "public.customer_acquisition_settings", "public.camera_campaigns", "public.camera_campaign_versions", "public.camera_campaign_prizes", "public.camera_campaign_prize_packages", "public.camera_campaign_daily_stats", "public.fal_monitoring_settings", "public.fal_account_snapshots", "private.native_commerce_settings", "public.native_product_versions", "public.native_product_availability", "private.mobile_push_settings", "private.mobile_account_settings", "public.model_registry", "public.feature_registry", "public.runtime_settings", "public.billing_packages", "public.branding_settings"]
+    }
+  ],
+  "externalAndNonTableStores": [
+    "Supabase Auth: users, identities, sessions, refresh tokens, MFA factors/challenges/AMR, OAuth grants and provider tokens; use supported Auth APIs and verify actual deployed schema before cleanup.",
+    "R2: exact in/<userId>/, out/<userId>/ and tmp/masks/<userId>/ prefixes, plus tmp/<ownedJobId>/ and recorded owned upload/object keys. A database assets row is not a complete inventory of uploaded or temporary objects.",
+    "Apple and Google identity-token revocation, RevenueCat customer metadata/history, Stripe customer and subscription/payment records, FAL inputs/results and third-party delivery logs.",
+    "Cloudflare queue messages, DLQs, caches and logs; email/notification providers and webhook recipients; backups under approved expiry and restore-time re-deletion rules.",
+    "Mobile secure storage, encrypted drafts, cached photos, push tokens and locally delivered notifications. Copies explicitly saved/shared to a customer's Photos/files or another app are outside Furnio's deletion control."
+  ]
+}

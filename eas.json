@@ -1,0 +1,8 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "local" },
+  "build": {
+    "development": { "developmentClient": true, "distribution": "internal", "env": { "EXPO_PUBLIC_APP_MODE": "demo" } },
+    "preview": { "distribution": "internal", "env": { "EXPO_PUBLIC_APP_MODE": "staging" } },
+    "production": { "autoIncrement": true, "env": { "EXPO_PUBLIC_APP_MODE": "production" } }
+  }
+}

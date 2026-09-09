@@ -1,0 +1,65 @@
+begin;
+insert into public.profiles(id) values ('00000000-0000-4000-8000-000000000100');
+do $$
+declare u uuid:='00000000-0000-4000-8000-000000000100'; another uuid:='00000000-0000-4000-8000-000000000020';
+  key1 uuid:=gen_random_uuid(); result jsonb; id1 uuid; id2 uuid;
+begin
+  perform public.test_assert(public.begin_customer_purchase_intent(u,'PRODUCTION','STRIPE','unused',key1,repeat('a',64))='{"enabled":false}', 'default gate preserves website behavior');
+  begin perform public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',key1,repeat('a',64));raise exception 'mobile gate bypassed';exception when sqlstate '55000' then null;end;
+  update private.native_commerce_settings set checkout_protection_enabled=true,customer_compatibility_enabled=true,acquisition_enabled=true;
+  insert into public.native_product_availability(product_version_id,available) select id,true from public.native_product_versions
+    on conflict(product_version_id) do update set available=true;
+  begin perform public.begin_customer_purchase_intent(u,'PRODUCTION','PLAY_STORE','monthly50',key1,repeat('a',64));raise exception 'mixed environment';exception when sqlstate '55000' then null;end;
+  begin perform public.begin_customer_purchase_intent(u,'SANDBOX','STRIPE','20000000-0000-4000-8000-000000000003',key1,repeat('a',64));raise exception 'developer product';exception when sqlstate '22023' then null;end;
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',key1,repeat('a',64));id1:=(result->>'intentId')::uuid;
+  perform public.test_assert((result->>'allowed')::boolean,'native subscription reserved');
+  perform public.test_assert(public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',key1,repeat('a',64))->>'intentId'=id1::text,'same request returns same reservation');
+  begin perform public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',key1,repeat('b',64));raise exception 'idempotency conflict accepted';exception when sqlstate '23505' then null;end;
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','STRIPE','20000000-0000-4000-8000-000000000002',gen_random_uuid(),repeat('a',64));
+  perform public.test_assert(result->>'reason'='purchase_pending','website blocked while native checkout pending');
+  begin perform public.read_native_purchase_intent(another,'SANDBOX',id1);raise exception 'cross account read';exception when sqlstate '42501' then null;end;
+  perform public.test_assert(public.launch_customer_purchase_intent(u,'SANDBOX',id1,'PLAY_STORE'),'first launch accepted');
+  perform public.test_assert(not public.launch_customer_purchase_intent(u,'SANDBOX',id1,'PLAY_STORE'),'launch replay never opens second store sheet');
+  perform public.test_assert(not public.cancel_unlaunched_purchase_intent(u,'SANDBOX',id1),'client cancellation cannot release uncertain payment');
+  begin update private.native_commerce_settings set acquisition_enabled=false,checkout_protection_enabled=false;
+    raise exception 'rollback removed in-flight protection';exception when sqlstate '55000' then null;end;
+  update private.customer_purchase_intents set reserved_until=clock_timestamp()-interval '1 day' where id=id1;
+  perform public.test_assert(public.read_native_purchase_intent(u,'SANDBOX',id1)->>'status'='pending','launched purchase cannot time out');
+  perform public.test_assert(public.read_native_purchase_intent(u,'SANDBOX',id1,'intent-txn')->>'status'='pending','client transaction hint is not payment evidence');
+  begin perform public.read_native_purchase_intent(u,'SANDBOX',id1,'other-txn');raise exception 'hint replaced';exception when sqlstate '22023' then null;end;
+  perform public.record_verified_native_purchase(u,'SANDBOX','PLAY_STORE','intent-txn','rc-subscription:intent-test','monthly50',clock_timestamp(),clock_timestamp()+interval '1 month');
+  perform public.test_assert(public.read_native_purchase_intent(u,'SANDBOX',id1)->>'status'='verified','only server-verified ledger delivery confirms intent');
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','STRIPE','20000000-0000-4000-8000-000000000002',gen_random_uuid(),repeat('a',64));
+  perform public.test_assert(result->>'reason'='existing_subscription','settled native subscription still blocks another provider');
+  update public.native_subscriptions set status='expired' where user_id=u;
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','STRIPE','20000000-0000-4000-8000-000000000002',gen_random_uuid(),repeat('a',64));id2:=(result->>'intentId')::uuid;
+  perform public.test_assert((result->>'allowed')::boolean,'verified expired subscription permits provider switch');
+  perform public.test_assert(public.launch_customer_purchase_intent(u,'SANDBOX',id2,'STRIPE'),'Stripe launch');
+  perform public.record_stripe_purchase_intent(u,'SANDBOX',id2,'cs_intent',false);
+  perform public.test_assert(public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',gen_random_uuid(),repeat('a',64))->>'reason'='purchase_pending','Stripe blocks native');
+  perform public.record_stripe_purchase_intent(u,'SANDBOX',id2,'cs_intent',true);
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',gen_random_uuid(),repeat('a',64));id1:=(result->>'intentId')::uuid;
+  perform public.test_assert((result->>'allowed')::boolean,'verified Stripe expiration releases checkout');
+  perform public.test_assert(public.cancel_unlaunched_purchase_intent(u,'SANDBOX',id1),'unopened sheet safely cancels');
+  -- Existing non-active-but-unsettled Stripe subscriptions must also block.
+  insert into public.subscriptions(id,user_id,status) values('sub_pending_intent',u,'incomplete');
+  perform public.test_assert(public.begin_customer_purchase_intent(u,'SANDBOX','PLAY_STORE','monthly50',gen_random_uuid(),repeat('a',64))->>'reason'='existing_subscription','incomplete Stripe subscription blocks');
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','APP_STORE','pack20',gen_random_uuid(),repeat('a',64));
+  perform public.test_assert((result->>'allowed')::boolean,'credit packs remain available with subscription');
+  id1:=(result->>'intentId')::uuid;
+  update private.customer_purchase_intents set reserved_until=clock_timestamp()-interval '1 second' where id=id1;
+  perform public.test_assert(not public.launch_customer_purchase_intent(u,'SANDBOX',id1,'APP_STORE'),'expired reservation cannot launch');
+  perform public.test_assert(public.read_native_purchase_intent(u,'SANDBOX',id1)->>'status'='expired','unopened reservation expires');
+  -- A stale, already-delivered store transaction cannot prove a NEW intent.
+  perform public.record_verified_native_purchase(u,'SANDBOX','APP_STORE','old-intent-pack','rc-purchase:old-intent-pack','pack20',clock_timestamp()-interval '1 day');
+  result:=public.begin_customer_purchase_intent(u,'SANDBOX','APP_STORE','pack20',gen_random_uuid(),repeat('a',64));id1:=(result->>'intentId')::uuid;
+  perform public.launch_customer_purchase_intent(u,'SANDBOX',id1,'APP_STORE');
+  perform public.test_assert(public.read_native_purchase_intent(u,'SANDBOX',id1,'old-intent-pack')->>'status'='pending','old transaction cannot settle a new checkout');
+  update private.customer_purchase_intents set launched_at=clock_timestamp()-interval '31 minutes' where id=id1;
+  perform public.test_assert(public.get_native_admin_customer_billing(u)::text like '%native_checkout_confirmation_pending%','stuck checkout visible to Admin');
+  perform public.test_assert(coalesce(public.get_native_admin_customer_billing(another)::text,'') not like '%checkout:'||id1::text||'%','checkout alerts stay account-scoped');
+  perform public.test_assert(not has_function_privilege('authenticated','public.begin_customer_purchase_intent(uuid,text,text,text,uuid,text)','EXECUTE'),'customers cannot forge user in RPC');
+  perform public.test_assert(not has_function_privilege('anon','public.launch_customer_purchase_intent(uuid,text,uuid,text)','EXECUTE'),'anonymous launch forbidden');
+  perform public.test_assert(not has_table_privilege('service_role','private.customer_purchase_intents','UPDATE'),'writes only through scoped RPC');
+end; $$;
+rollback;

@@ -1,0 +1,10 @@
+{
+  "source": "pashatech25/furnio-main",
+  "baselineCommit": "19908507ecb032abaa38b07df49648e677dd880c",
+  "note": "Validated working-tree contract snapshot; jobs.ts includes additive opt-in result source metadata. uploads.ts includes pre-existing uncommitted reference-furniture work. Import does not modify upstream files.",
+  "files": {
+    "jobs.ts": "0cf2b7e8232ca313a4ec51187974a1e403056416a8b66ef925f2202ac37d8641",
+    "uploads.ts": "91cc3240655710f7597d9851993f9e85909191f6e7706fd26a958e5a4ced2d93",
+    "auth.ts": "7d5c9be472a14e889b056191bb09f6b8e90a1d3f5e1569d93bed3fe23f3659f9"
+  }
+}

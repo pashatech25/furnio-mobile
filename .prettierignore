@@ -1,0 +1,8 @@
+src/contracts/**
+backend/worker-configuration.d.ts
+pnpm-lock.yaml
+node_modules/
+ios/
+android/
+dist/
+native-bundles/
