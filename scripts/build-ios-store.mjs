@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { localBuildEnvironment } from './local-native-environment.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const buildNumber = '2';
 const { mode, env } = localBuildEnvironment(root);
 assert.equal(mode, 'production', 'Archive requires explicit --production.');
 env.DEVELOPER_DIR = '/Applications/Xcode.app/Contents/Developer';
@@ -14,6 +15,7 @@ assert(!/beta/i.test(version), 'Use the release Xcode toolchain.');
 assert(!readFileSync(resolve(root, 'src/config.ts'), 'utf8').includes('FURNIO_STORE_CAPTURE'), 'Remove store capture fixtures.');
 const sourceInfo = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', resolve(root, 'ios/Furnio/Info.plist')], { encoding: 'utf8' }));
 assert(['$(MARKETING_VERSION)', '1.0.0'].includes(sourceInfo.CFBundleShortVersionString), 'Regenerate the iOS project for version 1.0.0 before archiving.');
+execFileSync('/usr/bin/plutil', ['-replace', 'CFBundleVersion', '-string', buildNumber, resolve(root, 'ios/Furnio/Info.plist')]);
 const stamp = new Date().toISOString().replaceAll(':', '-');
 const output = resolve(root, 'output/store');
 mkdirSync(output, { recursive: true });
@@ -26,7 +28,7 @@ const child = spawn('/usr/bin/xcodebuild', [
   '-configuration', 'Release', '-destination', 'generic/platform=iOS',
   '-archivePath', archive, '-derivedDataPath', 'output/xcode-store',
   '-allowProvisioningUpdates', 'DEVELOPMENT_TEAM=5SY24C9RBH',
-  'CODE_SIGN_STYLE=Automatic', 'MARKETING_VERSION=1.0.0', 'CURRENT_PROJECT_VERSION=2',
+  'CODE_SIGN_STYLE=Automatic', 'MARKETING_VERSION=1.0.0', `CURRENT_PROJECT_VERSION=${buildNumber}`,
   'archive',
 ], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let tail = '';
@@ -46,7 +48,7 @@ child.on('close', code => {
     const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', resolve(app, 'Info.plist')], { encoding: 'utf8' }));
     assert.equal(info.CFBundleIdentifier, 'ai.furnio.app');
     assert.equal(info.CFBundleShortVersionString, '1.0.0');
-    assert.equal(info.CFBundleVersion, '2');
+    assert.equal(info.CFBundleVersion, buildNumber);
     assert.equal(config.version, '1.0.0');
     console.log(`Verified signed archive: ${archive}. Export/upload and review gates remain separate.`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
