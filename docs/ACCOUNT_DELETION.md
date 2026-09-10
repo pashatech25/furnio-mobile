@@ -177,3 +177,6 @@ Supabase documents the JWT `session_id` relationship to `auth.sessions` and chec
 Supabase exposes server-only deletion and an irreversible soft-delete option; that option alone does not clean application tables/media or certify this app's retention obligations. [Supabase admin deleteUser](https://supabase.com/docs/reference/javascript/auth-admin-deleteuser).
 
 Auth schema fields used in the preflight were checked against the official [sessions migration](https://github.com/supabase/auth/blob/master/migrations/20220811173540_add_sessions_table.up.sql), [MFA/AMR migration](https://github.com/supabase/auth/blob/master/migrations/20221003041349_add_mfa_schema.up.sql) and [session-expiry migration](https://github.com/supabase/auth/blob/master/migrations/20221114143122_add_session_not_after_column.up.sql). Full deployed-schema validation remains required.
+# Owner retention clarification — September 10, 2026
+
+The owner confirmed payment records are retained for seven years for legal/tax purposes, and Furnio does not download separate customer backups. This does not mean infrastructure-managed database backups do not exist; their retention must be described separately and accurately. Do not request this same owner clarification again. These answers do not by themselves enable or certify the permanent-deletion processor.
