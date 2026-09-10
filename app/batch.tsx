@@ -24,6 +24,7 @@ import {
   type PreparedMask,
 } from "../src/batch/masks";
 import { createBatchReviewGate } from "../src/batch/review-gate";
+import { AI_PROCESSING_DISCLOSURE, AI_PROCESSING_CONFIRM_LABEL } from "../src/ai-processing-disclosure";
 import {
   MaskEditor,
   type MaskHandle,
@@ -729,10 +730,10 @@ export default function Batch() {
                       "Start this batch?",
                       demo
                         ? "This is sample processing only. No photo is uploaded and no payment or credit spend occurs."
-                        : `${cost} credits are shown at the current service price. Photos will be uploaded to Furnio’s processing providers. Successful jobs remain in your project even if another photo fails.`,
+                        : `${AI_PROCESSING_DISCLOSURE}\n\n${cost} credits are shown at the current service price. Successful jobs remain in your project even if another photo fails.`,
                       [
                         { title: "Not yet", secondary: true },
-                        { title: "Start batch", action: () => void submit() },
+                        { title: demo ? "Start batch" : AI_PROCESSING_CONFIRM_LABEL, action: () => void submit() },
                       ],
                     )
                   }

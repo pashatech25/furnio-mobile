@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Image, Modal, Pressable, View } from "react-native";
 import { ProcessingAnimation } from "../../src/ProcessingAnimation";
+import { AI_PROCESSING_DISCLOSURE, AI_PROCESSING_CONFIRM_LABEL } from "../../src/ai-processing-disclosure";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Crypto from "expo-crypto";
 import { ImagePlus } from "lucide-react-native";
@@ -630,11 +631,11 @@ export default function Studio() {
             demo ? "Preview this edit?" : "Ready to transform?",
             demo
               ? "This simulates processing using a sample result. No file is uploaded and no credits are spent."
-              : `Your selected files will be uploaded for AI processing using Furnio’s service providers and Admin instructions. ${trialAvailable ? "Trial eligibility is checked by the server." : `${cost} credits will be reserved.`}`,
+              : `${AI_PROCESSING_DISCLOSURE}\n\n${trialAvailable ? "Trial eligibility is checked by the server." : `${cost} credits will be reserved.`}`,
             [
               { title: "Keep editing", secondary: true },
               {
-                title: demo ? "Run demo" : "Upload and create",
+                title: demo ? "Run demo" : AI_PROCESSING_CONFIRM_LABEL,
                 action: () => void submit(),
               },
             ],

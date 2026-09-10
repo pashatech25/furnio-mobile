@@ -3,7 +3,7 @@ import type { ExpoConfig } from "expo/config";
 const config: ExpoConfig = {
   name: "Furnio",
   slug: "furnio-mobile",
-  version: "0.1.0",
+  version: "1.0.0",
   scheme: "furnio",
   orientation: "default",
   userInterfaceStyle: "light",

@@ -2,6 +2,14 @@
 
 ## Current checkpoint — 10 September 2026
 
+### Release archive and reviewer contact — 14:30 EDT
+
+Owner supplied the private Apple review contact; entered it and verified all four fields visually after reloading App Store Connect. Do not ask for those details again. Review-account credentials remain separate.
+
+Added one shared, explicit AI-recipient/input disclosure to the existing single and batch confirmation dialogs, with an “Agree & create” action before submission. Demo paths remain labelled simulations. All 1,116 tests / 73 files and mobile TypeScript pass. Source app version is now 1.0.0.
+
+`scripts/build-ios-store.mjs --production` creates a uniquely named archive using release Xcode 26.6 without changing the global Xcode selection. The first archive exposed the generated native version still being 0.1.0; the generated plist now follows MARKETING_VERSION and the script checks this before building. Corrected archive `output/store/Furnio-2026-09-10T18-28-23.683Z.xcarchive` passed codesign verification, production configuration, bundle identifier and 1.0.0 version checks. Store export is separate; no upload or submission is implied. `store/ExportOptions.plist` selects local App Store Connect distribution export, not upload.
+
 ### Owner confirmed rights; Apple validation checked
 
 Owner confirmed content rights and requested submission. Saved Apple's affirmative third-party content-rights declaration and verified it on App Information. Clicked Add for Review: Apple returned **Unable to Add for Review**, requiring a build, reviewer Contact Information, privacy-policy URL, privacy-practices disclosures and age-rating answers. Added and saved `https://furnio.ai/privacy`; remaining declarations are not completed. No build is present in the version's Build section. Submission has not occurred. Reviewer contact details were not supplied by the confirmation; request the actual name/email/phone rather than infer them from account data.
