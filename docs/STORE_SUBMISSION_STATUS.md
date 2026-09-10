@@ -2,6 +2,10 @@
 
 ## Current checkpoint — 10 September 2026
 
+### Apple listing upload checkpoint
+
+Owner completed Apple sign-in. Verified Furnio app 6810452958, version 1.0, Prepare for Submission. Uploaded all six approved iPhone screenshots in the 6.9-inch slot (Apple reuses them for 6.5-inch), and all six approved iPad screenshots in the 13-inch slot. Saved description, keywords, support URL (`https://furnio.ai/contact`, HTTP 200 verified) and marketing URL. Apple accepted the iPad size-reuse notice. Manual release remains selected. Screenshot ordering still needs correction/verification: concurrent uploads produced completion order, not the approved numeric sequence. No build or review submission is claimed; reviewer access/contact, copyright, privacy/content declarations and release gates remain.
+
 ### Upload signing checkpoint — 10 September
 
 Dedicated Android upload signing implemented and tested (two focused tests and mobile TypeScript pass). First production AAB built successfully in 2m53s; JAR signature verified as Furnio Upload, embedded environment `production`, package `ai.furnio.app`, version `0.1.0`. This is a locally signed bundle, not a Play upload or final 1.0 candidate. See `ANDROID_UPLOAD_SIGNING.md`; rebuild after remaining app changes. Owner confirmed seven-year payment-record retention; recorded in `ACCOUNT_DELETION.md`. Apple still presents a sign-in screen. No website/database/Worker deployment made.
