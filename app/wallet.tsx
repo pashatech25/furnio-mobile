@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { AppState, View } from "react-native";
+import { AppState, Platform, View } from "react-native";
+import { purchaseGuidance } from "../src/purchase-guidance";
 import { useFocusEffect } from "expo-router";
 import { WalletCards } from "lucide-react-native";
 import { useApp } from "../src/state";
@@ -113,6 +114,10 @@ function WalletScreen() {
         Your credits and projects stay with the same account on the app and
         website. Your existing credit expiry and rollover rules are unchanged.
       </Body>
+      <Card>
+        <Heading small>{Platform.OS === "android" ? "Credits & subscriptions" : "Your Furnio account"}</Heading>
+        <Body>{purchaseGuidance(Platform.OS)}</Body>
+      </Card>
       <Button
         title="Refresh balance"
         secondary

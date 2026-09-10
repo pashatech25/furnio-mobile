@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { purchaseGuidance } from "../src/purchase-guidance";
 import {
   ImageBackground,
   Linking,
@@ -186,6 +187,7 @@ export default function SignIn() {
           ? "One account for your photos, projects and credits—everywhere."
           : "Your next listing starts here."}
       </Body>
+      {signup && !recovery && <Notice>{purchaseGuidance(Platform.OS)}</Notice>}
       {demo ? (
         <Notice>
           This is your interactive app preview. All account details and balances

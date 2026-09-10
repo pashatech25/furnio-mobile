@@ -4,6 +4,12 @@ Owner approved 9 September 2026. **This supersedes native-commerce requirements 
 
 ## Decision
 
+### September 10 purchasing-information update
+
+Owner requested clear purchase/account guidance. Android signup and Credits now show plain-text information that credits/subscriptions are available at furnio.ai using the same account; there is no clickable URL or checkout button. This follows Google's consumption-only information exception. iOS displays neutral shared-account/no-in-app-purchase information; no universal external-purchase CTA is added. A US-storefront exception must not be inferred from device locale or IP. Apple companion classification remains subject to review.
+
+Sources checked: https://support.google.com/googleplay/android-developer/answer/10281818?hl=en and https://developer.apple.com/app-store/review/guidelines/ (3.1.1 and 3.1.3(f)).
+
 - The native iOS/Android apps are free companions to Furnio. Subscriptions and credit packs are purchased only through the existing Furnio website/Stripe checkout.
 - Keep the same authenticated customer, shared server credit balance, projects and nine service workflows. Do not change website prices, tax, credit expiry/rollover, trials, coupons or grants.
 - No native purchase/restore/product catalogue, store credit grant, RevenueCat configuration or Google external-payment-link programme in v1.
