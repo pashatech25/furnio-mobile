@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { quoteHeaders } from "./credit-quote";
+import { requestDeadline, type RequestBoundary } from "./deadline";
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -14,6 +15,7 @@ export function createApi(
   base: string,
   getToken: () => Promise<string | null>,
   fetcher: typeof fetch = fetch,
+  boundary?: RequestBoundary,
 ) {
   return async function request<T>(
     path: string,
@@ -23,6 +25,8 @@ export function createApi(
       signal?: AbortSignal;
       public?: boolean;
       expectedCredits?: number;
+      /** Synchronous receipt marker immediately before the actual network dispatch. */
+      onDispatch?: () => void;
     } = {},
   ): Promise<T> {
     if (!base || new URL(base).protocol !== "https:")
@@ -38,11 +42,29 @@ export function createApi(
       options.expectedCredits,
       options.public,
     );
+    boundary?.assertCurrent();
+    if (options.signal?.aborted)
+      throw new ApiError("Request cancelled before sending.", 0);
     const token = options.public ? null : await getToken();
+    boundary?.assertCurrent();
+    if (options.signal?.aborted)
+      throw new ApiError("Request cancelled before sending.", 0);
     if (!options.public && !token)
       throw new ApiError("Please sign in again.", 401);
+    const encodedBody = body === undefined ? undefined : JSON.stringify(body);
     let response: Response;
+    const deadline = requestDeadline(30_000, [
+      options.signal,
+      boundary?.signal,
+    ]);
+    const check = () => {
+      boundary?.assertCurrent();
+      if (deadline.signal.aborted) throw new Error("Request stopped.");
+    };
+    let json: unknown;
     try {
+      check();
+      options.onDispatch?.();
       response = await fetcher(base + path, {
         method: body === undefined ? "GET" : "POST",
         headers: {
@@ -51,9 +73,12 @@ export function createApi(
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: options.signal ?? AbortSignal.timeout(30_000),
+        ...(encodedBody === undefined ? {} : { body: encodedBody }),
+        signal: deadline.signal,
       });
+      check();
+      json = await response.json().catch(() => null);
+      check();
     } catch {
       // Never automatically retry a POST: the upstream customer job routes do not promise an idempotent retry.
       throw new ApiError(
@@ -63,8 +88,9 @@ export function createApi(
         0,
         body !== undefined,
       );
+    } finally {
+      deadline.dispose();
     }
-    const json: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const error = z
         .object({ error: z.string(), code: z.string().max(64).optional() })
@@ -88,3 +114,4 @@ export function createApi(
     return result.data;
   };
 }
+export type ApiClient = ReturnType<typeof createApi>;

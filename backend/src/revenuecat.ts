@@ -126,13 +126,14 @@ export class RevenueCatVerifier {
       !url.pathname.startsWith(this.prefix + "/")
     )
       throw new HttpError(502, "Invalid verification endpoint.");
-    const response = await this.fetcher(url, {
+    // Preserve the native workerd receiver when fetch is stored on the adapter.
+    const response = await this.fetcher.call(globalThis, url, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
         Accept: "application/json",
       },
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) {

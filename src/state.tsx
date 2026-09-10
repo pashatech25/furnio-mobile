@@ -7,14 +7,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 import { z } from "zod";
 import { supabase } from "./auth/client";
 import { config, demo } from "./config";
 import { createApi } from "./api/client";
+import { readWebsiteBilling } from "./api/website-billing";
 import {
-  capabilitiesSchema,
-  mobileBillingSchema,
   projectSchema,
   runtimeSchema,
   trialSchema,
@@ -33,6 +32,7 @@ import { meResponseSchema } from "./contracts/auth";
 import { notificationController } from "./notifications";
 import { setDraftOwner } from "./drafts";
 import { createDevicePrivacyLifecycle } from "./device-privacy-lifecycle";
+import { customerOperations } from "./auth/native-operations";
 
 const token = async () =>
   (await supabase?.auth.getSession())?.data.session?.access_token ?? null;
@@ -44,6 +44,8 @@ type State = {
   loading: boolean;
   error: string | null;
   runtime: Runtime | null;
+  runtimeError: string | null;
+  refreshRuntime: () => Promise<void>;
   trial: Trial | null;
   projects: Project[];
   billing: MobileBilling | null;
@@ -53,7 +55,6 @@ type State = {
   devicePrivacyError: string | null;
   retryDevicePrivacy: () => void;
   addProject: (project: Project) => void;
-  demoPurchase: (credits: number) => void;
 };
 const Context = createContext<State | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -67,6 +68,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [runtime, setRuntime] = useState<Runtime | null>(
     demo ? sampleRuntime : null,
   );
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const refreshRuntime = useCallback(async () => {
+    if (demo) return;
+    setRuntimeError(null);
+    try {
+      setRuntime(await api("/api/public-config", runtimeSchema, undefined, { public: true }));
+    } catch {
+      setRuntimeError("Furnio’s sign-in settings could not load. Reconnect and try again.");
+    }
+  }, []);
   const [trial, setTrial] = useState<Trial | null>(demo ? sampleTrial : null);
   const [projects, setProjects] = useState<Project[]>(
     demo ? sampleProjects : [],
@@ -158,11 +169,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [clearPrivate, privacyRetry]);
   useEffect(() => {
-    if (!demo)
-      void api("/api/public-config", runtimeSchema, undefined, { public: true })
-        .then(setRuntime)
-        .catch((error) => setError(error.message));
-  }, []);
+    void refreshRuntime();
+  }, [refreshRuntime]);
   const refresh = useCallback(async () => {
     if (demo || !user || loading || devicePrivacyError) return;
     const epoch = identityEpoch.current;
@@ -198,31 +206,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
       if (!current()) return;
       setProjects(list.projects);
-      // No fake billing fallback if mobile compatibility has not been released.
-      const capabilities = await mobileApi(
-        "/v1/capabilities",
-        capabilitiesSchema,
-      );
-      if (capabilities.billingReady) {
-        const store = Platform.OS === "ios" ? "APP_STORE" : "PLAY_STORE";
-        const next = await mobileApi(
-          `/v1/billing?store=${store}`,
-          mobileBillingSchema,
-        );
-        if (current()) setBilling(next);
-      } else {
-        const credits = await api(
-          "/api/credits/balance",
-          z.object({ balance: z.number().int() }),
-        );
-        if (current())
-          setBilling({
-            balance: credits.balance,
-            subscription: null,
-            products: [],
-            transactions: [],
-          });
-      }
+      // Read the existing customer wallet. No native purchase tables or store SDK required.
+      const next = await readWebsiteBilling(api);
+      if (current()) setBilling(next);
     } catch (error) {
       if (current())
         setError(
@@ -241,6 +227,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       runtime,
+      runtimeError,
+      refreshRuntime,
       trial,
       projects,
       billing,
@@ -258,41 +246,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setBilling(sampleBilling);
       },
       signOut: async () => {
-        if (supabase) {
-          // Erase only this installation's indexed draft copies/settings before sign-out.
-          // Purchase, batch, notification and deletion receipts use separate namespaces.
-          await setDraftOwner(null).catch(() => undefined);
-          // Persist a disable intent first. Offline cleanup retries on next app
-          // foreground; optional push must not prevent customer sign-out.
-          await notificationController.disable().catch(() => undefined);
-          const { error } = await supabase.auth.signOut({ scope: "local" });
-          if (error) {
-            // Auth remains signed in. Restore access to an empty local draft store.
-            await setDraftOwner(user?.id ?? null).catch(() => {
-              setDevicePrivacyError(
-                "Device draft cleanup needs attention. Unlock this device and try again; cloud work and receipts are preserved.",
-              );
-            });
-            throw error;
+        // Stop editor work before slow device/push cleanup, not after Auth emits.
+        const resumeOperations = customerOperations.pause();
+        try {
+          if (supabase) {
+            // Erase only this installation's indexed draft copies/settings before sign-out.
+            // Purchase, batch, notification and deletion receipts use separate namespaces.
+            await setDraftOwner(null).catch(() => undefined);
+            // Persist a disable intent first. Offline cleanup retries on next app
+            // foreground; optional push must not prevent customer sign-out.
+            await notificationController.disable().catch(() => undefined);
+            const { error } = await supabase.auth.signOut({ scope: "local" });
+            if (error) {
+              // Auth remains signed in. Restore access to an empty local draft store.
+              await setDraftOwner(user?.id ?? null).catch(() => {
+                setDevicePrivacyError(
+                  "Device draft cleanup needs attention. Unlock this device and try again; cloud work and receipts are preserved.",
+                );
+              });
+              throw error;
+            }
           }
+          clearPrivate();
+        } finally {
+          resumeOperations();
         }
-        clearPrivate();
       },
       addProject: (project) => setProjects((current) => [project, ...current]),
-      demoPurchase: (credits) => {
-        if (demo)
-          setBilling((current) =>
-            current
-              ? { ...current, balance: current.balance + credits }
-              : current,
-          );
-      },
     }),
     [
       user,
       loading,
       error,
       runtime,
+      runtimeError,
+      refreshRuntime,
       trial,
       projects,
       billing,

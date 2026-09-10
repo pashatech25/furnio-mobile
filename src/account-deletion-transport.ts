@@ -89,12 +89,14 @@ export function createDeletionTransport(
         // account fields or reverse-proxy debug output) in a native dialog.
         throw new AccountPrivacyError(
           response.status === 503
-            ? "Account review or deletion is not enabled yet. Your account has not been deleted by this app."
-            : response.status === 401 || response.status === 403
-              ? "Verify this same Furnio account again before continuing."
-              : response.status === 404
-                ? "The saved request could not be found. Keep this receipt and contact support if a confirmation was interrupted."
-                : "The account request could not be completed. Check its saved status before starting another request.",
+            ? "The account privacy service is temporarily unavailable. Keep your saved receipt and check status later."
+            : response.status === 429
+              ? "Too many account privacy requests. Wait one minute, then check saved status. Do not submit deletion again."
+              : response.status === 401 || response.status === 403
+                ? "Verify this same Furnio account again before continuing."
+                : response.status === 404
+                  ? "The saved request could not be found. Keep this receipt and contact support if a confirmation was interrupted."
+                  : "The account request could not be completed. Check its saved status before starting another request.",
           response.status,
         );
       }

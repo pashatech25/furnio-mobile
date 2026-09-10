@@ -29,6 +29,9 @@ vi.mock("./auth/client", () => ({
   },
 }));
 vi.mock("./state", () => ({ mobileApi: calls.api }));
+// Preserve the deferred commerce implementation's tests. Shipping companion
+// behaviour (real policy false, even with stale env flags) is tested separately.
+vi.mock("./commerce-policy", () => ({ nativeCommerceAllowed: true }));
 vi.mock("expo-crypto", () => ({
   randomUUID: () => "30000000-0000-4000-8000-000000000001",
 }));

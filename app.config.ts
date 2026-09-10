@@ -11,6 +11,7 @@ const config: ExpoConfig = {
   backgroundColor: "#f7f5ef",
   ios: {
     bundleIdentifier: "ai.furnio.app",
+    appleTeamId: "5SY24C9RBH",
     supportsTablet: true,
     usesAppleSignIn: true,
     // RN 0.86 is new-architecture-only. Its CocoaPods discovery uses an
@@ -31,6 +32,7 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-secure-store",
     "expo-font",
+    ["expo-audio", { microphonePermission: false, recordAudioAndroid: false, enableBackgroundPlayback: false, enableBackgroundRecording: false }],
     "expo-apple-authentication",
     "expo-system-ui",
     [
@@ -55,10 +57,11 @@ const config: ExpoConfig = {
     "expo-status-bar",
     "expo-web-browser",
     "expo-sharing",
-    "./plugins/with-store-purchases.cjs",
     "./plugins/with-ios-space-safe-build.cjs",
+    "./plugins/with-ios-scene-lifecycle.cjs",
   ],
   extra: {
+    furnioEnvironment: process.env.EXPO_PUBLIC_APP_MODE ?? "demo",
     ...(process.env.EXPO_PUBLIC_EAS_PROJECT_ID
       ? { eas: { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID } }
       : {}),

@@ -15,3 +15,6 @@ SUPABASE_SERVICE_ROLE_KEY=
 REVENUECAT_SECRET_API_KEY=
 REVENUECAT_WEBHOOK_AUTHORIZATION=
 REVENUECAT_WEBHOOK_SIGNING_SECRET=
+# Independent random 32-byte key encoded as 64 lowercase hex characters.
+# Needed before enabling account privacy review/requests. Do not reuse billing keys.
+ACCOUNT_DELETION_LIMIT_SECRET=

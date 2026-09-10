@@ -1,0 +1,36 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "furnio-mobile",
+  "account_id": "414fde01446debc02bbdd49e29e3a875",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {"pattern": "mobile-api.furnio.ai", "custom_domain": true}
+  ],
+  "observability": {"enabled": true, "redact_query_string": true, "logs": {"enabled": true, "invocation_logs": false}},
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SUPABASE_URL": "https://sgsjkgfwgxmlqcgyuyeh.supabase.co",
+    "SUPABASE_PROJECT_REF": "sgsjkgfwgxmlqcgyuyeh",
+    "MOBILE_ENABLED": "true",
+    "MOBILE_BILLING_READ_ENABLED": "false",
+    "MOBILE_ACTIVITY_READ_ENABLED": "true",
+    "NATIVE_RECONCILIATION_ENABLED": "false",
+    "NATIVE_ACQUISITION_ENABLED": "false",
+    "MOBILE_NOTIFICATIONS_ENABLED": "false",
+    "MOBILE_ACCOUNT_REVIEW_ENABLED": "false",
+    "MOBILE_ACCOUNT_REQUESTS_ENABLED": "false",
+    "MOBILE_ACCOUNT_CLEANUP_ENABLED": "false",
+    "MOBILE_ACCOUNT_AUTH_BLOCK_ENABLED": "false",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAEhr66dsL3Z-R16K",
+    "CHALLENGE_HOSTNAME": "mobile-api.furnio.ai",
+    "REVENUECAT_PROJECT_ID": "",
+    "REVENUECAT_APP_IDS": "",
+    "EXPO_PROJECT_ID": ""
+  },
+  "secrets": {"required": ["SUPABASE_SERVICE_ROLE_KEY"]},
+  "services": [{"binding": "PLATFORM", "service": "virtual-staging-api"}]
+}

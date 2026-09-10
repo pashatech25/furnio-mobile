@@ -1,0 +1,274 @@
+diff --git a/android/src/main/java/com/horcrux/svg/ImageView.java b/android/src/main/java/com/horcrux/svg/ImageView.java
+index d3abd8574d88d752d897c82e034792de9ec2219e..19e3b93d768e3fb2038f5c270f09315bdd53d455 100644
+--- a/android/src/main/java/com/horcrux/svg/ImageView.java
++++ b/android/src/main/java/com/horcrux/svg/ImageView.java
+@@ -35,6 +35,7 @@ import com.facebook.react.uimanager.events.EventDispatcher;
+ import com.facebook.react.views.imagehelper.ImageSource;
+ import com.facebook.react.views.imagehelper.ResourceDrawableIdHelper;
+ import com.horcrux.svg.events.SvgLoadEvent;
++import java.util.Objects;
+ import java.util.concurrent.atomic.AtomicBoolean;
+ import javax.annotation.Nonnull;
+ import javax.annotation.Nullable;
+@@ -46,6 +47,7 @@ class ImageView extends RenderableView {
+   private SVGLength mW;
+   private SVGLength mH;
+   private String uriString;
++  private String notifiedUri;
+   private int mImageWidth;
+   private int mImageHeight;
+   private String mAlign;
+@@ -77,8 +79,12 @@ class ImageView extends RenderableView {
+   }
+ 
+   public void setSrc(@Nullable ReadableMap src) {
++    String nextUri = src == null ? null : src.getString("uri");
++    if (!Objects.equals(uriString, nextUri)) {
++      notifiedUri = null;
++    }
++    uriString = nextUri;
+     if (src != null) {
+-      uriString = src.getString("uri");
+ 
+       if (uriString == null || uriString.isEmpty()) {
+         // TODO: give warning about this
+@@ -134,22 +140,14 @@ class ImageView extends RenderableView {
+ 
+   private void loadBitmap(final ImagePipeline imagePipeline, final ImageRequest request) {
+     mLoading.set(true);
++    final String requestedUri = uriString;
+     final DataSource<CloseableReference<CloseableImage>> dataSource =
+         imagePipeline.fetchDecodedImage(request, mContext);
+     BaseBitmapDataSubscriber subscriber =
+         new BaseBitmapDataSubscriber() {
+           @Override
+           public void onNewResultImpl(Bitmap bitmap) {
+-            final EventDispatcher mEventDispatcher =
+-                UIManagerHelper.getEventDispatcherForReactTag(mContext, getId());
+-            mEventDispatcher.dispatchEvent(
+-                new SvgLoadEvent(
+-                    UIManagerHelper.getSurfaceId(ImageView.this),
+-                    getId(),
+-                    mContext,
+-                    uriString,
+-                    bitmap.getWidth(),
+-                    bitmap.getHeight()));
++            notifyBitmapLoaded(bitmap, requestedUri);
+             mLoading.set(false);
+             SvgView view = getSvgView();
+             if (view != null) {
+@@ -210,6 +208,24 @@ class ImageView extends RenderableView {
+     canvas.drawBitmap(bitmap, null, vbRect, alphaPaint);
+     mCTM.mapRect(vbRect);
+     this.setClientRect(vbRect);
++    // Warm-cache images skip the subscriber. They still need onLoad so
++    // repeat exports can wait for real pixels instead of timing out.
++    notifyBitmapLoaded(bitmap, uriString);
++  }
++
++  private void notifyBitmapLoaded(@Nullable Bitmap bitmap, @Nullable String loadedUri) {
++    if (bitmap == null || loadedUri == null || !loadedUri.equals(uriString)
++        || loadedUri.equals(notifiedUri)) {
++      return;
++    }
++    final EventDispatcher dispatcher =
++        UIManagerHelper.getEventDispatcherForReactTag(mContext, getId());
++    if (dispatcher != null) {
++      notifiedUri = loadedUri;
++      dispatcher.dispatchEvent(new SvgLoadEvent(
++          UIManagerHelper.getSurfaceId(this), getId(), mContext, loadedUri,
++          bitmap.getWidth(), bitmap.getHeight()));
++    }
+   }
+ 
+   private void tryRenderFromBitmapCache(
+diff --git a/android/src/main/java/com/horcrux/svg/RNSVGRenderableManager.java b/android/src/main/java/com/horcrux/svg/RNSVGRenderableManager.java
+index a6ea3b8bbf51ef06caf8e73db88fe67001bf1887..2b0f2321f4643f2ba3861075fa1cd5a43ea5e625 100644
+--- a/android/src/main/java/com/horcrux/svg/RNSVGRenderableManager.java
++++ b/android/src/main/java/com/horcrux/svg/RNSVGRenderableManager.java
+@@ -21,11 +21,16 @@ import com.facebook.react.bridge.Promise;
+ import com.facebook.react.bridge.ReactApplicationContext;
+ import com.facebook.react.bridge.ReactMethod;
+ import com.facebook.react.bridge.ReadableMap;
++import com.facebook.react.bridge.UiThreadUtil;
+ import com.facebook.react.bridge.WritableMap;
+ import com.facebook.react.module.annotations.ReactModule;
+ import java.io.IOException;
+ import java.io.InputStream;
+ import java.io.InputStreamReader;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.FutureTask;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
+ import javax.annotation.Nonnull;
+ 
+ @ReactModule(name = RNSVGRenderableManager.NAME)
+@@ -146,6 +151,26 @@ class RNSVGRenderableManager extends NativeSvgRenderableModuleSpec {
+   @ReactMethod(isBlockingSynchronousMethod = true)
+   @Override
+   public WritableMap getBBox(Double tag, ReadableMap options) {
++    // Glyph/path state is shared with drawing and unmounting. Measure on UI,
++    // with a bounded wait and no dispatch onto the calling UI thread itself.
++    if (UiThreadUtil.isOnUiThread()) {
++      return getBBoxOnUiThread(tag, options);
++    }
++    FutureTask<WritableMap> measure = new FutureTask<>(() -> getBBoxOnUiThread(tag, options));
++    UiThreadUtil.runOnUiThread(measure);
++    try {
++      return measure.get(250, TimeUnit.MILLISECONDS);
++    } catch (InterruptedException e) {
++      Thread.currentThread().interrupt();
++      measure.cancel(false);
++      return Arguments.createMap();
++    } catch (ExecutionException | TimeoutException e) {
++      measure.cancel(false);
++      return Arguments.createMap();
++    }
++  }
++
++  private WritableMap getBBoxOnUiThread(Double tag, ReadableMap options) {
+     RenderableView svg = RenderableViewManager.getRenderableViewByTag(tag.intValue());
+     if (svg == null) {
+       return Arguments.createMap();
+@@ -157,6 +182,15 @@ class RNSVGRenderableManager extends NativeSvgRenderableModuleSpec {
+     boolean clipped = options.getBoolean("clipped");
+ 
+     try {
++      // An offscreen export may not have drawn yet. Text needs actual Paint,
++      // Canvas and parent glyph state; getPath(null, null) cannot establish it.
++      if (svg.mPath == null) {
++        SvgView root = svg.getSvgView();
++        if (root == null) {
++          return Arguments.createMap();
++        }
++        root.prepareForMeasurement();
++      }
+       svg.getPath(null, null);
+     } catch (NullPointerException e) {
+       svg.invalidate();
+diff --git a/android/src/main/java/com/horcrux/svg/SvgView.java b/android/src/main/java/com/horcrux/svg/SvgView.java
+index f04da14fcbc42f05e36839f71256363528169f0b..9435fe365a1e4c6741f620e4c631be30a91a6336 100644
+--- a/android/src/main/java/com/horcrux/svg/SvgView.java
++++ b/android/src/main/java/com/horcrux/svg/SvgView.java
+@@ -348,6 +348,21 @@ public class SvgView extends ReactViewGroup implements ReactCompoundView, ReactC
+         mMinX * mScale, mMinY * mScale, (mMinX + mVbWidth) * mScale, (mMinY + mVbHeight) * mScale);
+   }
+ 
++  void prepareForMeasurement() {
++    // Establish logical viewBox/glyph bounds without allocating a photo-sized
++    // bitmap. Retain those paths for the immediately following bounds read.
++    Bitmap bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
++    Canvas previousCanvas = mCanvas;
++    try {
++      clearChildCache();
++      drawChildren(new Canvas(bitmap));
++    } finally {
++      mCanvas = previousCanvas;
++      bitmap.recycle();
++      invalidate();
++    }
++  }
++
+   String toDataURL() {
+     Bitmap bitmap = Bitmap.createBitmap(getWidth(), getHeight(), Bitmap.Config.ARGB_8888);
+ 
+diff --git a/apple/Elements/RNSVGSvgView.mm b/apple/Elements/RNSVGSvgView.mm
+index d03d5c0b6449696dccd966a85f44d0c5c780a47b..fa737c576720be314b1e39dea2e4793e2a8e8f15 100644
+--- a/apple/Elements/RNSVGSvgView.mm
++++ b/apple/Elements/RNSVGSvgView.mm
+@@ -376,13 +376,27 @@ - (RNSVGPlatformView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
+ - (NSString *)getDataURLWithBounds:(CGRect)bounds
+ {
+ #if !TARGET_OS_OSX // [macOS]
+-  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:bounds.size];
++  // Export dimensions are pixels, not UIKit points multiplied by Retina scale.
++  // Preserve transparency for masks and keep iOS consistent with Android.
++  UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
++  format.scale = 1;
++  format.opaque = NO;
++  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:bounds.size format:format];
+   UIImage *image = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *_Nonnull rendererContext) {
+ #else // [macOS
+   RNSVGUIGraphicsBeginImageContextWithOptions(bounds.size, NO, 1);
+ #endif // macOS]
+     [self clearChildCache];
++#if !TARGET_OS_OSX // [macOS]
++    // drawRect uses the on-screen view bounds, which can be 1x1 for a hidden
++    // export renderer. Use the requested export rect for the viewBox instead.
++    CGRect previousBoundingBox = _boundingBox;
++    _boundingBox = bounds;
++    [self drawToContext:rendererContext.CGContext withRect:bounds];
++    _boundingBox = previousBoundingBox;
++#else
+     [self drawRect:bounds];
++#endif
+     [self clearChildCache];
+     [self invalidate];
+ #if !TARGET_OS_OSX // [macOS]
+diff --git a/apple/RNSVGRenderableModule.mm b/apple/RNSVGRenderableModule.mm
+index ee076cd1918c57d0fd0936d37b7912a82372932e..6aceb1e80c6080894813b6d2215b666d6acca670 100644
+--- a/apple/RNSVGRenderableModule.mm
++++ b/apple/RNSVGRenderableModule.mm
+@@ -123,6 +123,22 @@ @implementation RNSVGRenderableModule
+ }
+ 
+ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(getBBox : (nonnull NSNumber *)reactTag options : (NSDictionary *)options)
++{
++  // getPath mutates shared text/glyph state, not just a cached rectangle. Keep
++  // the entire measurement on the same thread as SVG drawing and unmounting.
++  __block NSDictionary *bounds;
++  void (^measure)(void) = ^{
++    bounds = [self getBBoxOnMainThread:reactTag options:options];
++  };
++  if ([NSThread isMainThread]) {
++    measure();
++  } else {
++    dispatch_sync(dispatch_get_main_queue(), measure);
++  }
++  return bounds;
++}
++
++- (NSDictionary *)getBBoxOnMainThread:(NSNumber *)reactTag options:(NSDictionary *)options
+ {
+   RNSVGPlatformView *view = [self getRenderableView:reactTag];
+ 
+@@ -136,7 +152,15 @@ @implementation RNSVGRenderableModule
+   BOOL stroke = [[options objectForKey:@"stroke"] boolValue];
+   BOOL markers = [[options objectForKey:@"markers"] boolValue];
+   BOOL clipped = [[options objectForKey:@"clipped"] boolValue];
++  // Offscreen export views may never receive drawRect. getPath alone does not
++  // refresh fillBounds, and text needs a real graphics/glyph context. A bounded
++  // one-pixel root render establishes logical (viewBox) bounds for every node.
++  // getDataURL restores the viewport and invalidates the normal view afterward.
++#if !TARGET_OS_OSX
++  [svg.svgView getDataURLWithBounds:CGRectMake(0, 0, 1, 1)];
++#else
+   [svg getPath:nil];
++#endif
+ 
+   CGRect bounds = CGRectNull;
+   if (fill && !CGRectIsEmpty(svg.fillBounds)) {
+@@ -198,15 +222,19 @@ - (void)getRawResource:(NSString *)name resolve:(RCTPromiseResolveBlock)resolve
+ - (RNSVGPlatformView *)getRenderableView:(NSNumber *)reactTag
+ {
+   __block RNSVGPlatformView *view;
++  void (^lookup)(void) = ^{
+ #ifdef RCT_NEW_ARCH_ENABLED
+-  dispatch_sync(dispatch_get_main_queue(), ^{
+     view = [self.viewRegistry_DEPRECATED viewForReactTag:reactTag];
+-  });
+ #else
+-  dispatch_sync(dispatch_get_main_queue(), ^{
+     view = [self.bridge.uiManager viewForReactTag:reactTag];
+-  });
+ #endif // RCT_NEW_ARCH_ENABLED
++  };
++  // A main-thread measurement must not synchronously dispatch onto itself.
++  if ([NSThread isMainThread]) {
++    lookup();
++  } else {
++    dispatch_sync(dispatch_get_main_queue(), lookup);
++  }
+   return view;
+ }
+ 

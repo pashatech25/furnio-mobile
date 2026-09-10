@@ -7,7 +7,12 @@ export function normalizedPoint(
   width: number,
   height: number,
 ): Point {
-  if (width <= 0 || height <= 0) throw new Error("Photo layout is not ready.");
+  if (
+    ![x, y, width, height].every(Number.isFinite) ||
+    width <= 0 ||
+    height <= 0
+  )
+    throw new Error("Photo layout is not ready.");
   return { x: clamp(x / width), y: clamp(y / height) };
 }
 export function strokeBounds(strokes: Stroke[], width: number, height: number) {

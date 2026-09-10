@@ -1,0 +1,2 @@
+# Unified dependency patches contain significant leading-space context lines.
+*.patch -whitespace

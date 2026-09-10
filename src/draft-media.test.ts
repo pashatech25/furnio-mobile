@@ -4,6 +4,7 @@ const f = vi.hoisted(() => ({
   dirs: new Set<string>(),
   deleted: [] as string[],
   copied: [] as string[],
+  copyWait: undefined as Promise<void> | undefined,
   platform: { OS: "ios" },
 }));
 vi.mock("react-native", () => ({ Platform: f.platform }));
@@ -35,7 +36,8 @@ vi.mock("expo-file-system", () => {
     get name() {
       return this.uri.split("/").at(-1)!;
     }
-    copy(to: File) {
+    async copy(to: File) {
+      await f.copyWait;
       if (!this.exists) throw new Error("missing");
       f.files.add(to.uri);
       f.copied.push(to.uri);
@@ -120,10 +122,32 @@ beforeEach(() => {
   f.dirs.clear();
   f.deleted.length = 0;
   f.copied.length = 0;
+  f.copyWait = undefined;
   f.files.add(photo.uri);
   f.platform.OS = "ios";
 });
 describe("native draft cache boundaries", () => {
+  it("does not return draft metadata before the SDK copy finishes", async () => {
+    let resume!: () => void;
+    f.copyWait = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const pending = nativeDraftMedia(scope).copy(user, "virtual_staging", one, [
+      photo,
+    ]);
+    let returned = false;
+    void pending.then(() => {
+      returned = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(returned).toBe(false);
+    expect(f.copied).toHaveLength(0);
+    resume();
+    const [copy] = await pending;
+    expect(f.files.has(copy!.uri)).toBe(true);
+    expect(returned).toBe(true);
+  });
   it("copies before replacing, never deletes a picker original, and preserves other accounts", async () => {
     const m = nativeDraftMedia(scope);
     const a = await m.copy(user, "virtual_staging", one, [photo]);

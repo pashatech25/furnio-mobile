@@ -166,7 +166,7 @@ describe("server-derived RevenueCat recovery history", () => {
     );
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       method: "GET",
-      redirect: "error",
+      redirect: "manual",
     });
   });
 });

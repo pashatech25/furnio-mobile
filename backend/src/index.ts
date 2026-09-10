@@ -6,6 +6,10 @@ import { getActivity } from "./activity";
 import { processAccountMediaCleanup } from "./account-media-cleanup";
 import { processAccountAuthBlocks } from "./account-auth-block";
 import {
+  accountPrivacyLimitsReady,
+  AccountPrivacyRateLimitError,
+} from "./account-rate-limits";
+import {
   manageAccountDeletionRequest,
   reviewAccountDeletion,
 } from "./account-deletion";
@@ -48,7 +52,9 @@ export async function requireCustomer(request: Request, env: Env) {
     "https://platform.internal/api/me",
     {
       headers: { Authorization: authorization, Accept: "application/json" },
-      redirect: "error",
+      // workerd rejects redirect:"error" before making a request. Manual plus
+      // the non-2xx check below rejects redirects without forwarding credentials.
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     },
   );
@@ -70,6 +76,9 @@ function challenge(url: URL, env: Env) {
   const nonce = url.searchParams.get("nonce");
   if (!nonce || !z.uuid().safeParse(nonce).success)
     throw new HttpError(400, "Invalid security challenge.");
+  const action = url.searchParams.get("action") ?? "trial-phone";
+  if (!["trial-phone", "signup-email", "signin-email", "password-reset"].includes(action))
+    throw new HttpError(400, "Unsupported security challenge action.");
   if (
     url.protocol !== "https:" ||
     !env.CHALLENGE_HOSTNAME ||
@@ -81,7 +90,7 @@ function challenge(url: URL, env: Env) {
       "The native security challenge is not configured.",
     );
   const scriptNonce = crypto.randomUUID();
-  const script = `const challengeNonce=${JSON.stringify(nonce)};function onReady(){turnstile.render('#challenge',{sitekey:${JSON.stringify(env.TURNSTILE_SITE_KEY)},action:'trial-phone',theme:'light',callback:function(token){if(typeof token==='string'&&window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify({type:'furnio.turnstile',nonce:challengeNonce,token:token}));}});}`;
+  const script = `const challengeNonce=${JSON.stringify(nonce)};function expired(){if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify({type:'furnio.turnstile.expired',nonce:challengeNonce}));}function onReady(){turnstile.render('#challenge',{sitekey:${JSON.stringify(env.TURNSTILE_SITE_KEY)},action:${JSON.stringify(action)},theme:'light',callback:function(token){if(typeof token==='string'&&window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify({type:'furnio.turnstile',nonce:challengeNonce,token:token}));},'expired-callback':expired,'error-callback':expired});}`;
   return new Response(
     `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Furnio security check</title><style nonce="${scriptNonce}">body{margin:0;background:#f7f5ef;display:flex;justify-content:center}</style></head><body><div id="challenge"></div><script nonce="${scriptNonce}">${script}</script><script nonce="${scriptNonce}" src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onReady&amp;render=explicit" async defer></script></body></html>`,
     {
@@ -151,10 +160,12 @@ export default {
           ...gates,
           // Read/review readiness does not enable destructive confirmation.
           accountDeletionReviewReady:
-            env.MOBILE_ACCOUNT_REVIEW_ENABLED === "true",
+            env.MOBILE_ACCOUNT_REVIEW_ENABLED === "true" &&
+            accountPrivacyLimitsReady(env),
           accountDeletionRequestsReady:
             env.MOBILE_ACCOUNT_REVIEW_ENABLED === "true" &&
-            env.MOBILE_ACCOUNT_REQUESTS_ENABLED === "true",
+            env.MOBILE_ACCOUNT_REQUESTS_ENABLED === "true" &&
+            accountPrivacyLimitsReady(env),
           notificationsReady: notificationsReady(env),
           recoveryReady: env.NATIVE_RECONCILIATION_ENABLED === "true",
           billingReady:
@@ -305,7 +316,7 @@ export default {
       return response;
     } catch (error) {
       status = error instanceof HttpError ? error.status : 502;
-      return json(
+      const response = json(
         {
           error:
             error instanceof HttpError
@@ -315,6 +326,9 @@ export default {
         },
         status,
       );
+      if (error instanceof AccountPrivacyRateLimitError)
+        response.headers.set("Retry-After", String(error.retryAfter));
+      return response;
     } finally {
       // Never record tokens, user IDs, photos, URLs, query strings, phone numbers, or request bodies.
       console.log(

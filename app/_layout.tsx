@@ -5,6 +5,8 @@ import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppProvider, useApp } from "../src/state";
 import { NotificationLifecycle } from "../src/notification-lifecycle";
+import { editorNavigationOptions } from "../src/editor/navigation-options";
+import { ExportRecoveryNotice } from "../src/results/ExportRecoveryNotice";
 import {
   Body,
   Button,
@@ -106,10 +108,13 @@ function Navigation() {
         <Stack.Protected guard={verified}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="wallet" />
-          <Stack.Screen name="batch" />
+          <Stack.Screen name="batch" options={editorNavigationOptions} />
           <Stack.Screen name="new-project" />
           <Stack.Screen name="project/[id]" />
-          <Stack.Screen name="studio/[service]" />
+          <Stack.Screen
+            name="studio/[service]"
+            options={editorNavigationOptions}
+          />
           <Stack.Screen name="result/[jobId]" />
         </Stack.Protected>
         <Stack.Screen name="auth/callback" />
@@ -126,6 +131,7 @@ export default function RootLayout() {
     DMMedium: require("@expo-google-fonts/dm-sans/600SemiBold/DMSans_600SemiBold.ttf"),
     DMBold: require("@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf"),
     Serif: require("@expo-google-fonts/instrument-serif/400Regular/InstrumentSerif_400Regular.ttf"),
+    Caveat: require("@expo-google-fonts/caveat/600SemiBold/Caveat_600SemiBold.ttf"),
   });
   if (!loaded && !error)
     return (
@@ -145,6 +151,7 @@ export default function RootLayout() {
       <AppProvider>
         <DialogProvider>
           <StatusBar style="dark" />
+          <ExportRecoveryNotice />
           <Navigation />
         </DialogProvider>
       </AppProvider>

@@ -189,7 +189,7 @@ export async function deliverExpo(
           ? privacySafeMessage(delivery.pushToken)
           : { ids: [delivery.ticketId] },
       ),
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(8_000),
     });
   } catch {

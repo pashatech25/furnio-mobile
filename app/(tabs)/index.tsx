@@ -1,5 +1,9 @@
-import { Image, ImageBackground, Pressable, View } from "react-native";
-import { router } from "expo-router";
+import { ServicePhoto } from "../../src/ServicePhoto";
+import { TrialAllowance } from "../../src/TrialAllowance";
+import { isServiceLocked } from "../../src/api/funding";
+import { useCallback } from "react";
+import { AppState, Image, ImageBackground, Pressable, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
 import { ArrowUpRight, ChevronRight, Sparkles } from "lucide-react-native";
 import { useApp } from "../../src/state";
 import { demo } from "../../src/config";
@@ -16,7 +20,14 @@ import {
   styles,
 } from "../../src/ui";
 export default function Home() {
-  const { user, billing, projects, runtime, error, refresh } = useApp();
+  const { user, billing, projects, runtime, error, refresh, trial } = useApp();
+  useFocusEffect(useCallback(() => {
+    void refresh();
+    const foreground = AppState.addEventListener("change", state => {
+      if (state === "active") void refresh();
+    });
+    return () => foreground.remove();
+  }, [refresh]));
   const active = services.filter((service) =>
     runtime?.features.some((feature) => feature.slug === service.id),
   );
@@ -49,6 +60,7 @@ export default function Home() {
         <Body muted>Let’s make your next listing stand out.</Body>
       </View>
       {!!error && <Notice warning>{error}</Notice>}
+      <TrialAllowance />
       {!!error && (
         <Button
           title="Refresh account"
@@ -93,7 +105,7 @@ export default function Home() {
         ]}
       >
         <View>
-          <Body style={{ fontSize: 25, fontFamily: "DMMedium" }}>
+          <Body style={{ fontSize: 25, lineHeight: 34, paddingTop: 2, fontFamily: "DMMedium" }}>
             {billing?.balance ?? "—"} credits
           </Body>
           <Body muted style={{ fontSize: 12 }}>
@@ -101,7 +113,7 @@ export default function Home() {
           </Body>
         </View>
         <Button
-          title="Add credits"
+          title="View credits"
           secondary
           onPress={() => router.push("/wallet")}
         />
@@ -168,7 +180,7 @@ export default function Home() {
       )}
       <Body style={{ fontFamily: "DMBold" }}>A little inspiration</Body>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-        {active.slice(0, 4).map((service) => (
+        {active.filter(service => !isServiceLocked(trial, service.id, billing?.balance ?? null, runtime?.features.find(feature => feature.slug === service.id)?.credits_per_output)).slice(0, 4).map((service) => (
           <Pressable
             key={service.id}
             accessibilityRole="button"
@@ -182,18 +194,7 @@ export default function Home() {
               borderColor: colors.line,
             }}
           >
-            <Image
-              source={service.image}
-              style={{ width: "100%", height: 108 }}
-            />
-            <View style={{ padding: 13, gap: 4 }}>
-              <Body style={{ fontFamily: "DMBold", fontSize: 14 }}>
-                {service.name}
-              </Body>
-              <Body muted style={{ fontSize: 12, lineHeight: 17 }}>
-                {service.description}
-              </Body>
-            </View>
+<ServicePhoto service={service} compact />
           </Pressable>
         ))}
       </View>

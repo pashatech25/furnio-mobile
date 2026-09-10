@@ -38,12 +38,32 @@
       "REVENUECAT_SECRET_API_KEY",
       "REVENUECAT_WEBHOOK_AUTHORIZATION",
       "REVENUECAT_WEBHOOK_SIGNING_SECRET",
+      "ACCOUNT_DELETION_LIMIT_SECRET",
       "EXPO_ACCESS_TOKEN",
     ],
   },
   // Independent notification polling and bounded account cleanup; no imaging Worker trigger.
   // Flags AND the database setting remain disabled until staging acceptance.
   "triggers": { "crons": ["* * * * *"] },
+  // Locally reserved staging namespaces. Verify account-wide uniqueness before
+  // first deployment; production needs separate namespaces and a separate secret.
+  "ratelimits": [
+    {
+      "name": "ACCOUNT_DELETION_SOURCE_LIMIT",
+      "namespace_id": "2026090901",
+      "simple": { "limit": 120, "period": 60 },
+    },
+    {
+      "name": "ACCOUNT_DELETION_USER_LIMIT",
+      "namespace_id": "2026090902",
+      "simple": { "limit": 10, "period": 60 },
+    },
+    {
+      "name": "ACCOUNT_DELETION_RECEIPT_LIMIT",
+      "namespace_id": "2026090903",
+      "simple": { "limit": 12, "period": 60 },
+    },
+  ],
   // Unprovisioned, isolated staging media bucket only. Never point local testing
   // at the production media bucket. No binding credentials enter the native app.
   "r2_buckets": [

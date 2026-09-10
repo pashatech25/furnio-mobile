@@ -1,8 +1,35 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApi } from "./client";
 const schema = z.object({ ok: z.boolean() });
+afterEach(() => vi.useRealTimers());
 describe("customer API transport", () => {
+  it("marks dispatch after authentication and serialization, directly before fetch", async () => {
+    const events: string[] = [];
+    const fetcher = vi.fn(async () => {
+      events.push("fetch");
+      return Response.json({ ok: true });
+    });
+    await createApi(
+      "https://staging.example",
+      async () => {
+        events.push("token");
+        return "fixture";
+      },
+      fetcher,
+    )(
+      "/api/projects",
+      schema,
+      {
+        toJSON: () => {
+          events.push("encode");
+          return {};
+        },
+      },
+      { onDispatch: () => events.push("dispatch") },
+    );
+    expect(events).toEqual(["token", "encode", "dispatch", "fetch"]);
+  });
   it("never requests anything when the demo has no API base", async () => {
     const fetcher = vi.fn();
     await expect(
@@ -113,5 +140,93 @@ describe("customer API transport", () => {
         async () => Response.json({ error: "Invalid file" }, { status: 422 }),
       )("/api/mobile/v1/jobs/stage", schema, {}, { expectedCredits: 5 }),
     ).rejects.toMatchObject({ uncertain: false, status: 422 });
+  });
+  it("does not dispatch if cancellation happened while reading the token", async () => {
+    const controller = new AbortController(),
+      fetcher = vi.fn();
+    const request = createApi(
+      "https://staging.example",
+      async () => {
+        controller.abort();
+        return "fixture";
+      },
+      fetcher,
+    );
+    await expect(
+      request("/api/projects", schema, {}, { signal: controller.signal }),
+    ).rejects.toMatchObject({ uncertain: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([false, true])(
+    "discards late JSON after cancellation (POST=%s)",
+    async (post) => {
+      const controller = new AbortController();
+      const response = Response.json({ ok: true });
+      response.json = async () => {
+        controller.abort();
+        return { ok: true };
+      };
+      const fetcher = vi.fn(async () => response);
+      const request = createApi(
+        "https://staging.example",
+        async () => "fixture",
+        fetcher,
+      );
+      await expect(
+        request("/api/projects", schema, post ? {} : undefined, {
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({ uncertain: post });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("retains the 30-second timeout alongside explicit screen cancellation", async () => {
+    vi.useFakeTimers();
+    const parent = new AbortController();
+    const fetcher = vi.fn(
+      (_url: string | URL | Request, options?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          options!.signal!.addEventListener(
+            "abort",
+            () => reject(new Error("timeout")),
+            { once: true },
+          );
+        }),
+    );
+    const request = createApi(
+      "https://staging.example",
+      async () => "fixture",
+      fetcher,
+    );
+    const expectation = expect(
+      request("/api/projects", schema, {}, { signal: parent.signal }),
+    ).rejects.toMatchObject({ uncertain: true });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expectation;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(parent.signal.aborted).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("rechecks the account boundary after token retrieval and before dispatch", async () => {
+    let current = true;
+    const fetcher = vi.fn();
+    const request = createApi(
+      "https://staging.example",
+      async () => {
+        current = false;
+        return "fixture";
+      },
+      fetcher,
+      {
+        signal: new AbortController().signal,
+        assertCurrent() {
+          if (!current) throw new Error("Changed");
+        },
+      },
+    );
+    await expect(request("/api/projects", schema, {})).rejects.toThrow(
+      "Changed",
+    );
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

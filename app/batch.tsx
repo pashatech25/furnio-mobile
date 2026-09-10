@@ -1,18 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Pressable, View } from "react-native";
+import { Image, Platform, Pressable, View } from "react-native";
+import { ProcessingAnimation } from "../src/ProcessingAnimation";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Crypto from "expo-crypto";
-import { api, useApp } from "../src/state";
-import { ApiError } from "../src/api/client";
-import { supabase } from "../src/auth/client";
-import { demo } from "../src/config";
+import { useApp } from "../src/state";
+import { ApiError, createApi } from "../src/api/client";
+import { createMediaUploads } from "../src/api/media-upload";
+import { useEditOperation } from "../src/editor/use-edit-operation";
+import { config, demo } from "../src/config";
 import { getService, services, type ServiceId } from "../src/services";
-import {
-  choosePhotos,
-  chooseFloorplan,
-  uploadReservedPhoto,
-  type LocalPhoto,
-} from "../src/media";
+import { fileBytes, type LocalPhoto } from "../src/media";
+import { usePhotoInputs } from "../src/media/use-photo-inputs";
 import {
   runBatch,
   supportsBatch,
@@ -21,11 +19,11 @@ import {
   validBatchSettings,
 } from "../src/batch/runner";
 import {
-  savePreparedMasks,
-  removePreparedMasks,
+  createNativeMaskStore,
   uploadPreparedMasks,
   type PreparedMask,
 } from "../src/batch/masks";
+import { createBatchReviewGate } from "../src/batch/review-gate";
 import {
   MaskEditor,
   type MaskHandle,
@@ -95,6 +93,8 @@ export default function Batch() {
   const params = useLocalSearchParams<{ projectId?: string }>(),
     app = useApp(),
     show = useDialog();
+  const beginOperation = useEditOperation(app.user?.id);
+  const { choosePhotos, chooseFloorplan } = usePhotoInputs(app.user?.id);
   const [projectId, setProjectId] = useState(
     params.projectId ?? app.projects[0]?.id ?? "",
   );
@@ -106,13 +106,17 @@ export default function Batch() {
   const [states, setStates] = useState<ItemState[]>([]),
     [reservation, setReservation] = useState<ReserveBatchResponse | null>(null);
   const [started, setStarted] = useState(false);
+  const [painting, setPainting] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [cleanupPending, setCleanupPending] = useState(false);
   const [recovery, setRecovery] = useState<BatchJournal | null>(null),
     [recoveryReady, setRecoveryReady] = useState(demo);
   const mask = useRef<MaskHandle>(null),
     alive = useRef(true),
     stop = useRef(false),
     lock = useRef(false),
-    allMasks = useRef<PreparedMask[]>([]);
+    maskStore = useRef(createNativeMaskStore()),
+    reviewGate = useRef(createBatchReviewGate());
   const selected = items[active],
     isMask = service === "item_removal" || service === "custom_staging";
   const feature = app.runtime?.features.find(
@@ -139,18 +143,15 @@ export default function Batch() {
       live = false;
     };
   }, [app.user?.id]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
       alive.current = false;
       stop.current = true;
-      try {
-        removePreparedMasks(allMasks.current);
-      } catch {
-        /* OS cache cleanup is also safe. */
-      }
-    },
-    [],
-  );
+      reviewGate.current.invalidate();
+      maskStore.current.clear();
+    };
+  }, []);
   function update(change: Partial<Item>) {
     setItems((current) =>
       current.map((item, index) =>
@@ -159,11 +160,20 @@ export default function Batch() {
     );
   }
   async function add(pdf = false) {
-    if (started || busy) return;
+    if (started || busy || lock.current || reviewGate.current.active) return;
+    let operation;
     try {
+      operation = beginOperation();
+    } catch {
+      return;
+    }
+    lock.current = true;
+    try {
+      if (!demo) await operation.getToken();
       const files = pdf
         ? await chooseFloorplan()
         : await choosePhotos(50 - items.length);
+      operation.assertCurrent();
       setItems((current) => [
         ...current,
         ...files.slice(0, 50 - current.length).map((file) => ({
@@ -181,50 +191,74 @@ export default function Batch() {
         })),
       ]);
     } catch (error) {
+      if (!operation.current) return;
       show(
         "Choose your files",
         error instanceof Error ? error.message : "Files could not be opened.",
       );
+    } finally {
+      lock.current = false;
+      operation.dispose();
     }
   }
   async function review() {
-    if (!selected) return;
+    if (!selected || busy || started || reviewGate.current.active) return;
+    const photoId = selected.id;
+    setReviewing(true);
     try {
-      let masks = selected.masks,
-        regions = selected.regions;
-      if (isMask) {
-        if (demo) {
-          show(
-            "Native mask export",
-            "The preview lets you paint. Saving masks must be tested in an iOS or Android development build.",
-          );
-          return;
+      await reviewGate.current.run(async (current) => {
+        let masks = selected.masks,
+          regions = selected.regions;
+        if (isMask) {
+          if (Platform.OS === "web")
+            throw new Error(
+              "Painted batch reviews require the iOS or Android app. The browser preview is design-only.",
+            );
+          if (!mask.current) throw new Error("The mask editor is not ready.");
+          regions = mask.current.snapshot();
+          const exported = await mask.current.export();
+          if (!current() || !alive.current) return;
+          masks = maskStore.current.save(photoId, exported, (prepared) => {
+            validBatchSettings(
+              service,
+              itemSettings({ ...selected, masks: prepared }, service),
+            );
+          });
+        } else {
+          validBatchSettings(service, itemSettings(selected, service));
         }
-        if (!mask.current) throw new Error("The mask editor is not ready.");
-        regions = mask.current.snapshot();
-        masks = savePreparedMasks(await mask.current.export());
-        allMasks.current.push(...masks);
-      }
-      validBatchSettings(
-        service,
-        itemSettings({ ...selected, masks }, service),
-      );
-      setItems((current) =>
-        current.map((item, index) =>
-          index === active ? { ...item, masks, regions, reviewed: true } : item,
-        ),
-      );
-      if (active < items.length - 1) setActive(active + 1);
+        if (!current() || !alive.current) return;
+        setItems((items) =>
+          items.map((item) =>
+            item.id === photoId
+              ? { ...item, masks, regions, reviewed: true }
+              : item,
+          ),
+        );
+        if (active < items.length - 1) setActive(active + 1);
+      });
     } catch (error) {
-      show(
-        "Review this photo",
-        error instanceof Error ? error.message : "Please check its settings.",
-      );
+      if (alive.current)
+        show(
+          "Review this photo",
+          error instanceof Error ? error.message : "Please check its settings.",
+        );
+    } finally {
+      if (alive.current) {
+        setReviewing(false);
+        setCleanupPending(maskStore.current.pending > 0);
+      }
     }
   }
   async function submit() {
+    if (!demo && !hasServiceCredits(app.billing?.balance ?? null, cost)) {
+      show("Credits required", "Batch edits use spendable credits. Complimentary trial previews cannot fund a batch.");
+      return;
+    }
     if (
       lock.current ||
+      reviewGate.current.active ||
+      maskStore.current.pending > 0 ||
       recovery ||
       !recoveryReady ||
       !app.user ||
@@ -233,6 +267,12 @@ export default function Batch() {
       items.some((item) => !item.reviewed)
     )
       return;
+    let operation;
+    try {
+      operation = beginOperation();
+    } catch {
+      return;
+    }
     lock.current = true;
     setBusy(true);
     setStarted(true);
@@ -253,7 +293,7 @@ export default function Batch() {
     const persist = () => {
       void saveBatchJournal({ ...journal, jobIds: [...journal.jobIds] }).catch(
         () => {
-          if (alive.current)
+          if (alive.current && operation.current)
             setError(
               "The latest recovery checkpoint could not be saved. Keep this page open and note your batch/job references. Do not resubmit.",
             );
@@ -271,7 +311,20 @@ export default function Batch() {
         );
         return;
       }
+      await operation.getToken();
+      const request = createApi(
+        config.platform,
+        operation.getToken,
+        fetch,
+        operation,
+      );
+      const uploads = createMediaUploads({
+        api: request,
+        readBytes: fileBytes,
+        boundary: operation,
+      });
       await saveBatchJournal(journal);
+      operation.assertCurrent();
       const result = await runBatch(
         service,
         projectId,
@@ -282,20 +335,14 @@ export default function Batch() {
         })),
         {
           expectedCredits: cost,
-          api,
-          upload: uploadReservedPhoto,
+          api: request,
+          upload: uploads.uploadReservedPhoto,
           ensureCurrent: async () => {
             if (!alive.current || stop.current)
               throw new Error(
                 "Further items were stopped. Already accepted jobs continue.",
               );
-            if (
-              (await supabase?.auth.getSession())?.data.session?.user.id !==
-              userId
-            )
-              throw new Error(
-                "The account changed. Remaining items were not submitted.",
-              );
+            await operation.getToken();
           },
           prepareSettings: async (position, itemId) =>
             isMask
@@ -304,6 +351,8 @@ export default function Batch() {
                     items[position]!.masks,
                     service as "item_removal" | "custom_staging",
                     itemId,
+                    uploads.uploadMask,
+                    operation.assertCurrent,
                   ),
                 }
               : {},
@@ -315,7 +364,7 @@ export default function Batch() {
               phase: "uploading",
             };
             persist();
-            if (alive.current) setReservation(value);
+            if (alive.current && operation.current) setReservation(value);
           },
           onState: (state) => {
             if (state.jobId) {
@@ -325,7 +374,7 @@ export default function Batch() {
               };
               persist();
             }
-            if (alive.current)
+            if (alive.current && operation.current)
               setStates((current) =>
                 [
                   ...current.filter((item) => item.position !== state.position),
@@ -342,10 +391,11 @@ export default function Batch() {
           : "needs_review",
       };
       persist();
-      void app.refresh();
+      if (operation.current) void app.refresh();
     } catch (error) {
       if (
         error instanceof ApiError &&
+        operation.current &&
         error.code === "CREDIT_QUOTE_CHANGED" &&
         journal.batchId === null
       ) {
@@ -356,7 +406,7 @@ export default function Batch() {
           () => false,
         );
         await app.refresh();
-        if (alive.current) {
+        if (alive.current && operation.current) {
           setStarted(!cleared);
           setError(
             cleared
@@ -368,7 +418,7 @@ export default function Batch() {
       }
       journal = { ...journal, phase: "needs_review" };
       if (!demo) persist();
-      if (alive.current)
+      if (alive.current && operation.current)
         setError(
           error instanceof Error
             ? error.message
@@ -376,17 +426,34 @@ export default function Batch() {
         );
     } finally {
       lock.current = false;
-      if (alive.current) setBusy(false);
+      if (alive.current && operation.current) setBusy(false);
+      operation.dispose();
     }
   }
   return (
-    <Page back title="Batch edits">
+    <Page back title="Batch edits" scrollEnabled={!painting}>
+      {busy && <ProcessingAnimation label="Preparing and submitting your photos…" />}
       <Heading>A whole listing.{"\n"}One considered workflow.</Heading>
       <Body muted>
         Up to 50 independent photos. Review each photo’s settings before credits
         are reserved. Multi-view and reference furniture use their dedicated
         editors.
       </Body>
+      {cleanupPending && (
+        <Card>
+          <Notice warning>
+            Some temporary mask copies could not be cleared. Your original
+            photos are unchanged. Retry cleanup before preparing more masks or
+            starting this batch.
+          </Notice>
+          <Button
+            secondary
+            title="Retry temporary-mask cleanup"
+            disabled={reviewing || busy}
+            onPress={() => setCleanupPending(maskStore.current.cleanup() > 0)}
+          />
+        </Card>
+      )}
       {recovery && (
         <Card>
           <Heading small>Check your previous batch.</Heading>
@@ -425,7 +492,12 @@ export default function Batch() {
         </Card>
       )}
       {!started && !recovery && recoveryReady && (
-        <>
+        <View
+          style={{ gap: 20 }}
+          pointerEvents={reviewing ? "none" : "auto"}
+          accessibilityElementsHidden={reviewing}
+          importantForAccessibility={reviewing ? "no-hide-descendants" : "auto"}
+        >
           <Label>PROJECT</Label>
           <View style={[styles.row, { flexWrap: "wrap" }]}>
             {app.projects.map((project) => (
@@ -526,6 +598,7 @@ export default function Batch() {
                       custom={service === "custom_staging"}
                       initialRegions={selected.regions}
                       onRegionsChange={(regions) => update({ regions })}
+                      onDrawingChange={setPainting}
                     />
                   ) : selected.file.contentType === "image/jpeg" ? (
                     <Image
@@ -612,12 +685,16 @@ export default function Batch() {
                   )}
                   <Button
                     title="Save review & next photo"
+                    busy={reviewing}
                     onPress={() => void review()}
                   />
                   <Button
                     title="Remove this photo"
                     secondary
                     onPress={() => {
+                      setCleanupPending(
+                        maskStore.current.remove(selected.id) > 0,
+                      );
                       setItems((current) =>
                         current.filter((item) => item.id !== selected.id),
                       );
@@ -640,7 +717,9 @@ export default function Batch() {
                       : "Reserve credits & start"
                   }
                   disabled={
+                    (!demo && !hasServiceCredits(app.billing?.balance ?? null, cost)) ||
                     !projectId ||
+                    cleanupPending ||
                     !feature ||
                     items.some((item) => !item.reviewed) ||
                     (!demo && (app.billing?.balance ?? 0) < cost)
@@ -661,7 +740,13 @@ export default function Batch() {
               </Card>
             </>
           )}
-        </>
+        </View>
+      )}
+      {reviewing && (
+        <Notice>
+          Preparing this photo’s masks on your device… No photo is uploaded
+          until you confirm starting the batch.
+        </Notice>
       )}
       {!!error && <Notice warning>{error}</Notice>}
       {reservation && (
@@ -715,3 +800,4 @@ export default function Batch() {
     </Page>
   );
 }
+import { hasServiceCredits } from "../src/api/funding";

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { boundedBytes, HttpError } from "./http";
 import { NativeDatabase, storeEnvironment } from "./native-events";
 import { requireRecentAccountAuth } from "./recent-auth";
+import { beginAccountPrivacyLimits } from "./account-rate-limits";
 import {
   deletionCapabilitySchema,
   deletionConfirmationSchema,
@@ -30,10 +31,12 @@ export async function reviewAccountDeletion(
     throw new HttpError(503, "Account deletion review is not enabled.");
   if (request.method !== "GET" || new URL(request.url).search || request.body)
     throw new HttpError(400, "Account deletion review accepts no parameters.");
+  const limits = await beginAccountPrivacyLimits(request, env);
   // This route intentionally does not require the paid customer platform, phone
   // verification, or an unsuspended account. Those restrictions must not deny
   // an authenticated account holder their account-deletion privacy controls.
   const identity = await requireRecentAccountAuth(request, env, fetcher);
+  await limits.user(identity.userId);
   const database = new NativeDatabase(env, fetcher);
   return database.rpc(
     "get_mobile_account_deletion_review",
@@ -75,6 +78,7 @@ export async function manageAccountDeletionRequest(
       503,
       "Account deletion is not available in this build. Your account has not been changed.",
     );
+  const limits = await beginAccountPrivacyLimits(request, env);
   const bytes = await boundedBytes(request.body, 4096);
   let parsed: unknown;
   try {
@@ -93,6 +97,8 @@ export async function manageAccountDeletionRequest(
     action === "status"
       ? null
       : await requireRecentAccountAuth(request, env, fetcher);
+  if (identity) await limits.user(identity.userId);
+  else await limits.receipt(input.data.requestId, input.data.receiptSecret);
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(input.data.receiptSecret),

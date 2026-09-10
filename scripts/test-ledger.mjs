@@ -72,6 +72,34 @@ try {
   sql(readFileSync(resolve(main,'supabase/migrations/20260909113200_native_refund_reversal_recovery.sql'),'utf8'));
   sql(readFileSync(resolve(main,'supabase/migrations/20260909121424_native_sdk_cancellation_recovery.sql'),'utf8'));
   sql(readFileSync(resolve(main,'supabase/migrations/20260909130505_native_admin_reporting.sql'),'utf8'));
+  // Original table definitions, not a permissive hand-written email mock. No
+  // SES/email queue connection: this suite only tests PostgreSQL boundaries.
+  const emailFoundation = readFileSync(resolve(main,'supabase/migrations/20260831023826_automation_email_foundation.sql'),'utf8');
+  for (const table of ['email_templates','email_template_versions','email_outbox','email_deliveries']) {
+    const definition=emailFoundation.match(new RegExp(`create table public\\.${table} \\([\\s\\S]*?\\n\\);`))?.[0];
+    assert.ok(definition, `Original ${table} definition is present`);
+    sql(definition);
+  }
+  sql(readFileSync(resolve(main,'supabase/migrations/20260909150518_mobile_account_email_fence.sql'),'utf8'));
+  sql(readFileSync(resolve(main,'supabase/migrations/20260909185306_native_subscription_overlap_reporting.sql'),'utf8'));
+  for (const table of ['automation_flows','automation_flow_versions','automation_events','automation_runs','automation_waits','outbound_destination_allowlist']) {
+    const definition=emailFoundation.match(new RegExp(`create table public\\.${table} \\([\\s\\S]*?\\n\\);`))?.[0];
+    assert.ok(definition, `Original ${table} definition is present`);
+    sql(definition);
+  }
+  const webhookFoundation=readFileSync(resolve(main,'supabase/migrations/20260901225530_add_webhook_destinations_and_fal_observability.sql'),'utf8');
+  const deliveryDefinition=webhookFoundation.match(/create table public\.automation_webhook_deliveries \([\s\S]*?\n\);/)?.[0];
+  assert.ok(deliveryDefinition,'Original automation delivery definition is present');
+  sql(deliveryDefinition);
+  // Reproduce the original private-to-browser access model. The real Worker
+  // has service-role table access; do not run every assertion as table owner.
+  for (const table of ['automation_flows','automation_flow_versions','automation_events','automation_runs','automation_waits','outbound_destination_allowlist','automation_webhook_deliveries']) {
+    sql(`alter table public.${table} enable row level security;
+      revoke all on public.${table} from public,anon,authenticated;
+      grant all on public.${table} to service_role;`);
+  }
+  sql(readFileSync(resolve(main,'supabase/migrations/20260909193514_mobile_account_automation_fence.sql'),'utf8'));
+  sql(readFileSync(resolve(main,'supabase/migrations/20260909213457_native_automation_customer_billing.sql'),'utf8'));
   const currentTrigger = sql("select pg_get_functiondef('private.track_subscription_credit_ledger()'::regprocedure)");
   assert.ok(currentTrigger.includes("elsif new.reason = 'native_refund'"), 'Native-specific Stripe compatibility branch');
   sql(readFileSync(resolve(root,'backend/tests/ledger-cases.sql'),'utf8'));
@@ -81,6 +109,8 @@ try {
   sql(readFileSync(resolve(root,'backend/tests/compatibility-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/admin-native-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/native-reporting-cases.sql'),'utf8'));
+  sql(readFileSync(resolve(root,'backend/tests/subscription-overlap-cases.sql'),'utf8'));
+  sql(readFileSync(resolve(root,'backend/tests/automation-billing-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/recovery-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/purchase-intent-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/checkout-support-cases.sql'),'utf8'));
@@ -90,9 +120,28 @@ try {
   sql(readFileSync(resolve(root,'backend/tests/account-request-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/account-cleanup-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/account-auth-block-cases.sql'),'utf8'));
+  sql(readFileSync(resolve(root,'backend/tests/account-email-cases.sql'),'utf8'));
+  sql(readFileSync(resolve(root,'backend/tests/account-automation-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/stripe-checkout-recovery-cases.sql'),'utf8'));
   sql(readFileSync(resolve(root,'backend/tests/refund-reversal-cases.sql'),'utf8'));
   console.log('SQL ledger, environment, ownership, rollback, refund and privilege cases passed.');
+  // Each dispatcher has its own connection and races for the same outbox row.
+  // No real email/queue/provider is contacted by this test.
+  const emailUser='00000000-0000-4000-8000-000000000411';
+  const emailId='50000000-0000-4000-8000-000000000411';
+  sql(`insert into auth.users(id) values('${emailUser}');
+    insert into public.profiles(id,email) values('${emailUser}','concurrent-email@example.invalid');
+    insert into public.email_templates(id,slug,display_name,category,event_type) values('${emailId}','concurrent_email_fixture','Fixture','product','test');
+    insert into public.email_outbox(id,event_id,event_type,user_id,normalized_recipient,template_id,template_version,category,idempotency_key)
+      values('${emailId}','${emailId}','test','${emailUser}','concurrent-email@example.invalid','${emailId}',1,'product','${emailId}');`);
+  const emailSnapshot=JSON.parse(sql(`select jsonb_build_object('user_id',user_id,'normalized_recipient',normalized_recipient,
+    'template_id',template_id,'template_version',template_version,'payload',payload) from public.email_outbox where id='${emailId}';`));
+  const emailClaims=await Promise.all([1,2].map(()=>concurrentSql(`select public.claim_mobile_account_email('${emailId}','${JSON.stringify(emailSnapshot)}'::jsonb);`)));
+  assert.ok(emailClaims.every(result=>result.code===0),'Concurrent email checks complete without database errors');
+  assert.equal(emailClaims.filter(result=>JSON.parse(result.output).status==='allowed').length,1,'Exactly one dispatcher receives email send permission');
+  assert.equal(emailClaims.filter(result=>JSON.parse(result.output).status==='ambiguous').length,1,'Other dispatcher leaves in-flight email alone');
+  assert.equal(sql(`select attempt_count from public.email_outbox where id='${emailId}';`).trim(),'1','Atomic email claim counts one attempt');
+  console.log('Two-connection guarded email dispatch claim passed.');
   const reversalUser='00000000-0000-4000-8000-000000000305';
   sql(`insert into public.profiles(id) values('${reversalUser}');
     select public.record_verified_native_purchase('${reversalUser}','SANDBOX','APP_STORE','reverse305','rc-purchase:reverse305','pack20',now()-interval '1 day');`);
@@ -256,6 +305,39 @@ try {
   assert.equal(authAcks.filter(result=>result.output.trim()==='t').length,1,'One durable observation per Auth lease');
   assert.equal(sql(`select state from private.mobile_account_deletion_requests where id='${authTarget.request}';`).trim(),'queued','Auth block cannot report deletion complete');
   console.log('Concurrent Auth claims/acknowledgements and administrator-promotion fence passed.');
+  for (const [index, ordering] of ['writer-first','fence-first'].entries()) {
+    const suffix=String(431+index);
+    const u=`00000000-0000-4000-8000-000000000${suffix}`;
+    const session=`10000000-0000-4000-8000-000000000${suffix}`;
+    const request=`30000000-0000-4000-8000-000000000${suffix}`;
+    const flow=`40000000-0000-4000-8000-000000000${suffix}`;
+    const run=`60000000-0000-4000-8000-000000000${suffix}`;
+    const existingRun=`70000000-0000-4000-8000-000000000${suffix}`;
+    sql(`insert into auth.users(id) values('${u}'); insert into public.profiles(id) values('${u}');
+      insert into auth.sessions(id,user_id) values('${session}','${u}');
+      insert into auth.mfa_amr_claims(session_id,authentication_method,updated_at) values('${session}','password',date_trunc('second',now()));
+      insert into public.automation_flows(id,name) values('${flow}','Isolated automation race');
+      insert into public.automation_runs(id,flow_id,flow_version,context) values('${existingRun}','${flow}',1,jsonb_build_object('customer_id','${u}'::text));`);
+    const proof=`'${u}','${session}',(select updated_at from auth.mfa_amr_claims where session_id='${session}'),'password','aal1'`;
+    const review=JSON.parse(sql(`select public.manage_mobile_account_deletion_request('prepare','SANDBOX','${request}',repeat('a',64),${proof});`));
+    sql(`select public.manage_mobile_account_deletion_request('confirm','SANDBOX','${request}',repeat('a',64),${proof},'${review.challenge}','shared-account-v1','DELETE MY FURNIO ACCOUNT',true,true);`);
+    const insert=`insert into public.automation_runs(id,flow_id,flow_version,context) values('${run}','${flow}',1,jsonb_build_object('customer_id','${u}'::text));`;
+    const fence=`select private.begin_mobile_account_cleanup('${request}','SANDBOX');`;
+    const snapshot=sql(`select jsonb_build_object('context',context,'current_node_id',current_node_id,'flow_id',flow_id,'flow_version',flow_version,'is_test',is_test) from public.automation_runs where id='${existingRun}';`).trim();
+    const first=concurrentSql(`begin; set local application_name='furnio-automation-${ordering}'; ${index===0?insert:fence} select pg_sleep(1); commit;`);
+    await waitForPause(`furnio-automation-${ordering}`);
+    const later=concurrentSql(index===0?fence:insert);
+    const guarded=index===1?concurrentSql(`select public.check_mobile_automation_work('run','${existingRun}','${snapshot}'::jsonb);`):null;
+    const race=await Promise.all([first,later]);
+    assert.ok(race.every(result=>result.code===0),`${ordering} automation race: ${race.map(result=>result.error).join(' ')}`);
+    assert.equal(sql(`select status from public.automation_runs where id='${run}';`).trim(),'cancelled',`${ordering}: late/early queued row suppressed`);
+    if (guarded) {
+      const result=await guarded;
+      assert.equal(result.code,0,result.error);
+      assert.equal(JSON.parse(result.output).status,'blocked','Guard reloads account state after waiting for fence');
+    }
+  }
+  console.log('Automation writer-first/fence-first races and loaded-snapshot rejection passed.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
   process.exitCode = 1;

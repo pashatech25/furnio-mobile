@@ -19,7 +19,7 @@ import { SvgXml } from "react-native-svg";
 import { ArrowLeft, ArrowRight, X } from "lucide-react-native";
 import { router } from "expo-router";
 import { wordmark } from "./brand";
-import { demo } from "./config";
+import { config, demo } from "./config";
 export const colors = {
   bg: "#f7f5ef",
   paper: "#fffefa",
@@ -34,8 +34,8 @@ export const styles = StyleSheet.create({
   muted: { color: colors.muted },
   heading: {
     fontFamily: "Serif",
-    fontSize: 42,
-    lineHeight: 45,
+    fontSize: 40,
+    lineHeight: 42,
     color: colors.ink,
     letterSpacing: -0.5,
   },
@@ -205,6 +205,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={title}
       accessibilityState={{ disabled: disabled || busy, busy }}
       onPress={onPress}
       disabled={disabled || busy}
@@ -274,11 +275,17 @@ export function Page({
   title,
   back,
   right,
+  scrollEnabled = true,
+  hideHeader = false,
+  footer,
 }: {
   children: React.ReactNode;
   title?: string;
   back?: boolean;
   right?: React.ReactNode;
+  scrollEnabled?: boolean;
+  hideHeader?: boolean;
+  footer?: React.ReactNode;
 }) {
   return (
     <SafeAreaView
@@ -289,7 +296,7 @@ export function Page({
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
       >
-        {demo && (
+        {(demo || config.mode === "staging") && (
           <View
             style={{
               backgroundColor: colors.soft,
@@ -298,23 +305,13 @@ export function Page({
             }}
           >
             <Text style={[styles.label, { fontSize: 10 }]}>
-              DEVELOPMENT DEMO · SAMPLE DATA · NO LIVE CALLS
+              {demo
+                ? "DEVELOPMENT DEMO · SAMPLE DATA · NO LIVE CALLS"
+                : "FURNIO STAGING · TEST ACCOUNTS ONLY"}
             </Text>
           </View>
         )}
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            flexGrow: 1,
-            padding: 23,
-            paddingBottom: 36,
-            width: "100%",
-            maxWidth: 760,
-            alignSelf: "center",
-            gap: 22,
-          }}
-        >
-          <View style={styles.between}>
+          {!hideHeader && <View style={[styles.between, { paddingHorizontal: 23, paddingVertical: 10, width: "100%", maxWidth: 760, alignSelf: "center", backgroundColor: colors.bg }]}>
             {back ? (
               <Pressable
                 accessibilityRole="button"
@@ -335,20 +332,40 @@ export function Page({
             )}
             {!!title && (
               <Body
-                style={{ fontFamily: "DMBold", flex: 1, textAlign: "center" }}
+                style={{ fontFamily: "DMBold", flex: 1, minWidth: 0, textAlign: "center" }}
               >
                 {title}
               </Body>
             )}
-            {right}
-          </View>
+            {right && <View style={{ flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}>{right}</View>}
+          </View>}
+        <ScrollView
+          scrollEnabled={scrollEnabled}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1, padding: 23, paddingBottom: 36, width: "100%", maxWidth: 760, alignSelf: "center", gap: 22 }}
+        >
           {children}
         </ScrollView>
+        {footer && <SafeAreaView edges={["bottom"]} style={{ backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.line }}><View style={{ paddingHorizontal: 23, paddingVertical: 12, width: "100%", maxWidth: 760, alignSelf: "center" }}>{footer}</View></SafeAreaView>}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 type DialogAction = { title: string; action?: () => void; secondary?: boolean };
+export function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: React.ReactNode }) {
+  return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#081b1866" }}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Close settings" onPress={onClose} style={{ flex: 1 }} />
+      <SafeAreaView edges={["bottom"]} style={{ maxHeight: "85%", backgroundColor: colors.paper, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}>
+        <View accessibilityViewIsModal style={{ flexShrink: 1, padding: 20, gap: 12 }}>
+          <View style={{ width: 38, height: 4, borderRadius: 5, backgroundColor: colors.line, alignSelf: "center" }} />
+          <ScrollView keyboardShouldPersistTaps="handled">{children}</ScrollView>
+          <Button title="Done" onPress={onClose} />
+        </View>
+      </SafeAreaView>
+    </View>
+  </Modal>;
+}
 type Show = (title: string, message: string, actions?: DialogAction[]) => void;
 const DialogContext = createContext<Show>(() => undefined);
 export function DialogProvider({ children }: { children: React.ReactNode }) {

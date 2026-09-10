@@ -9,27 +9,20 @@ import React, {
 import { Image, PanResponder, Platform, Pressable, View } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 import Slider from "@react-native-community/slider";
+import { ImageManipulator } from "expo-image-manipulator";
 import { Body, Button, colors, Field, Label, Notice, styles } from "../ui";
-import {
-  normalizedPoint,
-  pathFor,
-  strokeBounds,
-  type Stroke,
-} from "./geometry";
+import { pathFor, type Stroke } from "./geometry";
+import { createViewportGesture, initialViewport } from "./mask-viewport";
 import type { LocalPhoto } from "../media";
-export type PaintRegion = {
-  instruction: string;
-  operation: "remove" | "replace" | "restyle";
-  strokes: Stroke[];
-};
-export type MaskExport = {
-  bbox: ReturnType<typeof strokeBounds>;
-  instruction: string;
-  operation: PaintRegion["operation"];
-  regionIndex: number;
-  binary: string;
-  composite: string;
-};
+import {
+  captureMaskPng,
+  decodeMaskDimensions,
+  exportPaintRegions,
+  type PaintRegion,
+  type MaskExport,
+} from "./mask-export";
+import { MaskReview } from "./MaskReview";
+export type { PaintRegion, MaskExport } from "./mask-export";
 export type MaskHandle = {
   export: () => Promise<MaskExport[]>;
   snapshot: () => PaintRegion[];
@@ -51,8 +44,12 @@ export const MaskEditor = forwardRef<
     custom: boolean;
     initialRegions?: PaintRegion[];
     onRegionsChange?: (regions: PaintRegion[]) => void;
+    onDrawingChange?: (drawing: boolean) => void;
   }
->(function MaskEditor({ photo, custom, initialRegions, onRegionsChange }, ref) {
+>(function MaskEditor(
+  { photo, custom, initialRegions, onRegionsChange, onDrawingChange },
+  ref,
+) {
   const scale = Math.min(1, 2048 / Math.max(photo.width, photo.height));
   const width = Math.round(photo.width * scale),
     height = Math.round(photo.height * scale);
@@ -81,49 +78,32 @@ export const MaskEditor = forwardRef<
   const [brush, setBrush] = useState(52);
   const [layout, setLayout] = useState({ width: 0, height: 0 });
   const [drawing, setDrawing] = useState<Stroke | null>(null);
-  const liveStroke = useRef<Stroke | null>(null);
+  const [viewport, setViewport] = useState(initialViewport);
+  const viewportRef = useRef(viewport);
+  const [magnifier, setMagnifier] = useState(true);
+  const view = (next: typeof viewport) => { viewportRef.current = next; setViewport(next); };
+  const drawingChange = useRef(onDrawingChange);
+  drawingChange.current = onDrawingChange;
+  useEffect(
+    () => () => {
+      // A replaced photo/unmounted editor must never leave its page unscrollable.
+      drawingChange.current?.(false);
+    },
+    [],
+  );
   const binary = useRef<(Svg | null)[]>([]),
     composite = useRef<(Svg | null)[]>([]);
   const responder = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          const stroke = {
-            size: brush,
-            points: [
-              normalizedPoint(
-                event.nativeEvent.locationX,
-                event.nativeEvent.locationY,
-                layout.width,
-                layout.height,
-              ),
-            ],
-          };
-          liveStroke.current = stroke;
-          setDrawing(stroke);
-        },
-        onPanResponderMove: (event) => {
-          if (liveStroke.current) {
-            liveStroke.current = {
-              ...liveStroke.current,
-              points: [
-                ...liveStroke.current.points,
-                normalizedPoint(
-                  event.nativeEvent.locationX,
-                  event.nativeEvent.locationY,
-                  layout.width,
-                  layout.height,
-                ),
-              ],
-            };
-            setDrawing(liveStroke.current);
-          }
-        },
-        onPanResponderRelease: () => {
-          const stroke = liveStroke.current;
-          if (stroke)
+      PanResponder.create(
+        createViewportGesture({
+          layout,
+          brush,
+          getView: () => viewportRef.current,
+          view,
+          preview: setDrawing,
+          drawing: (painting) => drawingChange.current?.(painting),
+          commit: (stroke) => {
             setRegions((current) =>
               current.map((region, index) =>
                 index === active
@@ -131,14 +111,9 @@ export const MaskEditor = forwardRef<
                   : region,
               ),
             );
-          liveStroke.current = null;
-          setDrawing(null);
-        },
-        onPanResponderTerminate: () => {
-          liveStroke.current = null;
-          setDrawing(null);
-        },
-      }),
+          },
+        }),
+      ),
     [active, brush, layout],
   );
   const strokes = (list: Stroke[], color: string) =>
@@ -163,61 +138,49 @@ export const MaskEditor = forwardRef<
         />
       ),
     );
+  async function exportMasks() {
+    if (Platform.OS === "web")
+      throw new Error(
+        "Full-resolution mask export must be tested in the native development build. The browser preview is design-only.",
+      );
+    return exportPaintRegions(
+      regions,
+      custom,
+      { width, height },
+      (kind, index) => {
+        const svg = (kind === "binary" ? binary : composite).current[index];
+        return captureMaskPng(
+          svg ? (callback, size) => svg.toDataURL(callback, size) : null,
+          (uri) =>
+            // This RN Android version's getSize uses Fresco's encoded pipeline,
+            // which rejects data: URIs. Decode the PNG in memory instead; retain
+            // the passing iOS path and exact decoded-dimension checks.
+            Platform.OS === "android"
+              ? decodeMaskDimensions(() => ImageManipulator.manipulate(uri))
+              : Image.getSize(uri),
+          { width, height },
+        );
+      },
+    );
+  }
   useImperativeHandle(
     ref,
-    () => ({
-      snapshot: () => regions,
-      export: async () => {
-        if (Platform.OS === "web")
-          throw new Error(
-            "Full-resolution mask export must be tested in the native development build. The browser preview is design-only.",
-          );
-        const capture = (svg: Svg | null | undefined) =>
-          new Promise<string>((resolve, reject) => {
-            if (!svg) {
-              reject(new Error("Mask renderer is not ready."));
-              return;
-            }
-            const timer = setTimeout(
-              () => reject(new Error("Mask export timed out.")),
-              10_000,
-            );
-            svg.toDataURL(
-              (value) => {
-                clearTimeout(timer);
-                resolve(value);
-              },
-              { width, height },
-            );
-          });
-        const results: MaskExport[] = [];
-        for (const [index, region] of regions.entries()) {
-          if (!region.strokes.length) continue;
-          if (custom && !region.instruction.trim())
-            throw new Error("Describe the change for every painted region.");
-          results.push({
-            bbox: strokeBounds(region.strokes, width, height),
-            instruction: region.instruction,
-            operation: region.operation,
-            regionIndex: index,
-            binary: await capture(binary.current[index]),
-            composite: await capture(composite.current[index]),
-          });
-        }
-        if (!results.length)
-          throw new Error("Paint at least one area on the photo.");
-        return results;
-      },
-    }),
+    () => ({ snapshot: () => regions, export: exportMasks }),
     [regions, width, height, custom],
   );
   return (
     <View style={{ gap: 16 }}>
       <Notice>
-        Paint on the photo. Undo removes the last stroke; clear resets the
-        selected region.
+        Paint with one finger. Pinch to zoom; move with two fingers. Lift both
+        fingers before painting again. Scroll outside the photo.
       </Notice>
+      <View style={styles.between}>
+        <Label>{Math.round(viewport.zoom * 100)}% zoom</Label>
+        <Pressable accessibilityRole="button" onPress={() => view(initialViewport)} style={{ padding: 12 }}><Body>Reset view</Body></Pressable>
+        <Pressable accessibilityRole="switch" accessibilityState={{ checked: magnifier }} onPress={() => setMagnifier(value => !value)} style={{ padding: 12 }}><Body>Precision {magnifier ? "on" : "off"}</Body></Pressable>
+      </View>
       <View
+        testID="mask-paint-surface"
         onLayout={(event) => setLayout(event.nativeEvent.layout)}
         {...responder.panHandlers}
         style={{
@@ -227,16 +190,17 @@ export const MaskEditor = forwardRef<
           backgroundColor: colors.soft,
         }}
       >
-        <Image
-          source={{ uri: photo.uri }}
-          style={{ width: "100%", height: "100%" }}
-        />
+        <View pointerEvents="none" style={{ position: "absolute", left: viewport.x, top: viewport.y, width: layout.width * viewport.zoom, height: layout.height * viewport.zoom }}>
+          <Image
+            source={{ uri: photo.uri }}
+            style={{ width: "100%", height: "100%" }}
+          />
         <Svg
           pointerEvents="none"
           width="100%"
           height="100%"
           viewBox={`0 0 ${width} ${height}`}
-          style={{ position: "absolute", opacity: 0.55 }}
+          style={{ position: "absolute", top: 0, left: 0, opacity: 0.55 }}
         >
           {regions.map((region, index) => (
             <React.Fragment key={index}>
@@ -247,7 +211,21 @@ export const MaskEditor = forwardRef<
             </React.Fragment>
           ))}
         </Svg>
+        </View>
       </View>
+      {magnifier && drawing && layout.width > 0 && (() => {
+        const point = drawing.points[drawing.points.length - 1]!;
+        const zoom = Math.max(2.5, viewport.zoom * 1.5);
+        return <View pointerEvents="none" accessibilityLabel="Magnified brush preview" style={{ position: "absolute", right: 12, top: 0, width: 156, height: 116, borderRadius: 16, overflow: "hidden", borderWidth: 2, borderColor: colors.paper, backgroundColor: colors.ink, elevation: 12, shadowOpacity: 0.2, shadowRadius: 12 }}>
+          <View style={{ position: "absolute", left: 78 - point.x * layout.width * zoom, top: 58 - point.y * layout.height * zoom, width: layout.width * zoom, height: layout.height * zoom }}>
+            <Image source={{ uri: photo.uri }} style={{ width: "100%", height: "100%" }} />
+            <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} style={{ position: "absolute", opacity: 0.55 }}>
+              {regions.map((region, index) => <React.Fragment key={index}>{strokes(region.strokes, palette[index]!)}{index === active && strokes([drawing], palette[index]!)}</React.Fragment>)}
+            </Svg>
+          </View>
+          <Svg width={156} height={116} style={{ position: "absolute" }}><Circle cx={78} cy={58} r={Math.max(2, brush / width * layout.width * zoom / 2)} fill="none" stroke={colors.paper} strokeWidth={1.5} /></Svg>
+        </View>;
+      })()}
       <Label>Brush · {Math.round(brush)} px</Label>
       <Slider
         minimumValue={12}
@@ -402,6 +380,11 @@ export const MaskEditor = forwardRef<
           </React.Fragment>
         ))}
       </View>
+      <MaskReview
+        photo={photo}
+        exportMasks={exportMasks}
+        dimensions={{ width, height }}
+      />
     </View>
   );
 });

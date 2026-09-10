@@ -76,14 +76,20 @@ export function nativeDraftMedia(scope: string): DraftMedia {
           );
       }
       dir.create({ intermediates: true });
-      return photos.map((photo, index) => {
+      const copied: typeof photos = [];
+      for (const [index, photo] of photos.entries()) {
         const destination = new File(
           dir,
           `${index}.${photo.contentType === "application/pdf" ? "pdf" : "jpg"}`,
         );
-        new File(photo.uri).copy(destination);
-        return { ...photo, uri: destination.uri };
-      });
+        // Expo SDK 57 copy is asynchronous. Keep store serialization held until
+        // each write settles; Promise.all could reject while later copies run.
+        await new File(photo.uri).copy(destination);
+        if (!destination.exists)
+          throw new Error("The draft photo copy could not finish.");
+        copied.push({ ...photo, uri: destination.uri });
+      }
+      return copied;
     },
     exists: (user, service, generation, uri) => {
       const prefix =

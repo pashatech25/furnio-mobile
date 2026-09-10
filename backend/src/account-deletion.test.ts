@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "./index";
 import { reviewAccountDeletion } from "./account-deletion";
 import { requireRecentAccountAuth } from "./recent-auth";
+import { accountPrivacyLimitFixture } from "../tests/account-rate-limit-fixture";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
 const base = "https://abcdefghijklmnopqrst.supabase.co";
 const seconds = Math.floor(Date.now() / 1000);
 const environment = {
+  ...accountPrivacyLimitFixture(),
   ENVIRONMENT: "staging",
   SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst",
   SUPABASE_URL: base,
@@ -38,7 +40,10 @@ function request(jwt = token(), suffix = "") {
   return new Request(
     `https://mobile.test/v1/account/deletion/review${suffix}`,
     {
-      headers: { Authorization: `Bearer ${jwt}` },
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "CF-Connecting-IP": "192.0.2.1",
+      },
     },
   );
 }
@@ -98,7 +103,7 @@ describe("recent shared-account authentication", () => {
           Authorization: `Bearer ${jwt}`,
           Accept: "application/json",
         },
-        redirect: "error",
+        redirect: "manual",
         signal: expect.any(AbortSignal),
       }),
     );
@@ -276,6 +281,39 @@ describe("read-only deletion review", () => {
       p_assurance: "aal1",
       p_environment: "SANDBOX",
     });
+  });
+  it("rate-limits review before Auth and SQL when the source counter denies access", async () => {
+    const fetcher = vi.fn(async () => goodAuth());
+    await expect(
+      reviewAccountDeletion(
+        request(),
+        {
+          ...environment,
+          ACCOUNT_DELETION_SOURCE_LIMIT: {
+            limit: async () => ({ success: false }),
+          },
+        },
+        fetcher,
+      ),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("rate-limits a verified account before the review SQL read", async () => {
+    const fetcher = vi.fn(async () => goodAuth());
+    await expect(
+      reviewAccountDeletion(
+        request(),
+        {
+          ...environment,
+          ACCOUNT_DELETION_USER_LIMIT: {
+            limit: async () => ({ success: false }),
+          },
+        },
+        fetcher,
+      ),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][0]).toBe(`${base}/auth/v1/user`);
   });
   it("rejects a revoked session reported by the database after Auth verification", async () => {
     const fetcher = vi

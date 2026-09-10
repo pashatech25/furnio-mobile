@@ -46,7 +46,7 @@ describe("supported Auth sign-in blocking, not account deletion", () => {
     for (const [url, options] of fetcher.mock.calls) {
       expect(url).toBe(`${env.SUPABASE_URL}/auth/v1/admin/users/${userId}`);
       expect(options).toMatchObject({
-        redirect: "error",
+        redirect: "manual",
         cache: "no-store",
       });
       expect(options?.signal).toBeInstanceOf(AbortSignal);

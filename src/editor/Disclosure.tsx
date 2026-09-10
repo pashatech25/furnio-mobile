@@ -1,10 +1,25 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Platform, Pressable, Switch, View } from "react-native";
 import Svg, { Image as SvgImage, Text as SvgText } from "react-native-svg";
 import Slider from "@react-native-community/slider";
-import { File, Paths } from "expo-file-system";
+import { File } from "expo-file-system";
 import * as Crypto from "expo-crypto";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import type { OwnExportFile } from "../results/export-session";
+import type { ExportKind } from "../results/export-recovery";
+import {
+  createDisclosureCapture,
+  DisclosureExportError,
+  prepareDisclosureJpeg,
+  validatedDisclosure,
+} from "./disclosure-export";
 import {
   Body,
   Button,
@@ -17,8 +32,9 @@ import {
   styles,
 } from "../ui";
 import {
-  disclosureSchema,
+  fitDisclosureScale,
   fonts,
+  nativeDisclosureFont,
   placement,
   positions,
   type Disclosure,
@@ -54,7 +70,17 @@ export function DisclosureControls({
             value={value.text}
             onChangeText={(text) => update({ text })}
           />
+          <Body muted style={{ fontSize: 14 }}>
+            Up to 80 characters. Longer labels shrink to fit the photo.
+          </Body>
           <Label>Font</Label>
+          {Platform.OS === "android" && (
+            <Body muted style={{ fontSize: 14 }}>
+              Android uses system equivalents: sans-serif for Arial and
+              Helvetica, serif for Georgia and Times New Roman, and monospace
+              for Courier New.
+            </Body>
+          )}
           <View style={[styles.row, { flexWrap: "wrap" }]}>
             {fonts.map((fontFamily) => (
               <Pressable
@@ -145,117 +171,231 @@ export function DisclosureText({
   settings,
   width,
   height,
+  onReady,
+  onError,
 }: {
   settings: Disclosure;
   width: number;
   height: number;
+  onReady?: () => void;
+  onError?: () => void;
 }) {
-  const point = placement(settings, width, height);
-  return settings.enabled && settings.text ? (
+  return settings.enabled && settings.text.trim() ? (
+    <MeasuredDisclosureText
+      key={JSON.stringify([settings, width, height])}
+      settings={settings}
+      width={width}
+      height={height}
+      onReady={onReady}
+      onError={onError}
+    />
+  ) : null;
+}
+
+function MeasuredDisclosureText({
+  settings,
+  width,
+  height,
+  onReady,
+  onError,
+}: {
+  settings: Disclosure;
+  width: number;
+  height: number;
+  onReady?: () => void;
+  onError?: () => void;
+}) {
+  const text = useRef<SvgText>(null);
+  const [scale, setScale] = useState(1);
+  const attempts = useRef(0);
+  const callbacks = useRef({ onReady, onError });
+  callbacks.current = { onReady, onError };
+  useLayoutEffect(() => {
+    let current = true;
+    let frame: number;
+    const measure = () => {
+      if (!current) return;
+      try {
+        const bounds = text.current?.getBBox({
+          clipped: false,
+          stroke: false,
+          markers: false,
+        });
+        if (!bounds || !bounds.width || !bounds.height) {
+          if (++attempts.current < 12) {
+            frame = requestAnimationFrame(measure);
+            return;
+          }
+          callbacks.current.onError?.();
+          return;
+        }
+        const fit = fitDisclosureScale(
+          width,
+          height,
+          bounds.width,
+          bounds.height,
+        );
+        if (fit < 0.999) {
+          if (++attempts.current >= 12) {
+            callbacks.current.onError?.();
+            return;
+          }
+          // A small safety inset absorbs native font hinting/rounding differences.
+          setScale((value) => value * fit * 0.995);
+        } else callbacks.current.onReady?.();
+      } catch {
+        callbacks.current.onError?.();
+      }
+    };
+    frame = requestAnimationFrame(measure);
+    return () => {
+      current = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [width, height, scale]);
+  const point = placement(settings, width, height, scale);
+  return (
     <SvgText
+      ref={text}
       x={point.x}
       y={point.y}
       textAnchor={point.anchor}
       fontSize={point.size}
-      fontFamily={settings.fontFamily}
+      fontFamily={nativeDisclosureFont(settings.fontFamily, Platform.OS)}
       fontWeight="bold"
       fill={
         /^#[a-fA-F0-9]{6}$/.test(settings.color) ? settings.color : "#ffffff"
       }
       opacity={settings.opacity}
     >
-      {settings.text}
+      {settings.text.trim()}
     </SvgText>
-  ) : null;
+  );
 }
 export type DisclosureHandle = {
-  render: (uri: string, settings: Disclosure) => Promise<File>;
+  render: (
+    uri: string,
+    settings: Disclosure,
+    own: OwnExportFile,
+    allocate: (kind: ExportKind) => File,
+  ) => Promise<File>;
 };
+function jpegContext(uri: string) {
+  const context = ImageManipulator.manipulate(uri);
+  return {
+    release: () => context.release(),
+    renderAsync: async () => {
+      const image = await context.renderAsync();
+      return {
+        width: image.width,
+        height: image.height,
+        release: () => image.release(),
+        saveAsync: (options: { compress: number; base64: boolean }) =>
+          image.saveAsync({ ...options, format: SaveFormat.JPEG }),
+      };
+    },
+  };
+}
 export const DisclosureRenderer = forwardRef<DisclosureHandle>(
   function DisclosureRenderer(_, ref) {
     const svg = useRef<Svg>(null);
-    const capture = useRef<null | (() => void)>(null);
+    const active = useRef<AbortController | null>(null);
+    const mounted = useRef(true);
     const [source, setSource] = useState<{
+      id: string;
       base64: string;
       width: number;
       height: number;
       settings: Disclosure;
+      capture: ReturnType<typeof createDisclosureCapture>;
     } | null>(null);
+    useEffect(() => {
+      mounted.current = true;
+      return () => {
+        mounted.current = false;
+        active.current?.abort();
+      };
+    }, []);
     useImperativeHandle(
       ref,
       () => ({
-        render: async (uri, input) => {
+        render: async (uri, input, own, allocate) => {
           if (Platform.OS === "web")
             throw new Error(
               "Use the native build to export full-resolution photos.",
             );
-          const settings = disclosureSchema.parse(input);
-          const image = await ImageManipulator.manipulate(uri).renderAsync();
-          const prepared = await image.saveAsync({
-            format: SaveFormat.JPEG,
-            compress: 1,
-            base64: settings.enabled,
-          });
-          const temporary: File[] = [new File(prepared.uri)];
+          if (!mounted.current || active.current)
+            throw new DisclosureExportError(
+              "The photo renderer is unavailable or busy.",
+            );
+          const controller = new AbortController();
+          active.current = controller;
           try {
+            const settings = validatedDisclosure(input);
+            const prepared = await prepareDisclosureJpeg(
+              () => jpegContext(uri),
+              (path) => {
+                own(new File(path));
+              },
+              controller.signal,
+              { compress: 1, base64: settings.enabled && !!settings.text },
+            );
             let outputUri = prepared.uri;
             if (settings.enabled && settings.text) {
-              const data = await new Promise<string>((resolve, reject) => {
-                const timer = setTimeout(() => {
-                  capture.current = null;
-                  reject(new Error("The photo renderer timed out."));
-                }, 15_000);
-                capture.current = () => {
-                  capture.current = null;
-                  requestAnimationFrame(() => {
-                    if (!svg.current) {
-                      clearTimeout(timer);
-                      reject(new Error("Photo renderer is unavailable."));
-                      return;
-                    }
-                    svg.current.toDataURL(
-                      (base64) => {
-                        clearTimeout(timer);
-                        resolve(base64);
-                      },
-                      { width: prepared.width, height: prepared.height },
-                    );
-                  });
-                };
-                setSource({
-                  base64: prepared.base64!,
-                  width: prepared.width,
-                  height: prepared.height,
-                  settings,
-                });
+              const capture = createDisclosureCapture({
+                dimensions: prepared,
+                signal: controller.signal,
+                frame: (work) => {
+                  const frame = requestAnimationFrame(work);
+                  return () => cancelAnimationFrame(frame);
+                },
+                render: (done, dimensions) => {
+                  if (!svg.current) throw new Error("Renderer unavailable");
+                  svg.current.toDataURL(done, dimensions);
+                },
               });
-              const png = new File(
-                Paths.cache,
-                `furnio-label-${Crypto.randomUUID()}.png`,
-              );
+              setSource({
+                id: Crypto.randomUUID(),
+                base64: prepared.base64!,
+                width: prepared.width,
+                height: prepared.height,
+                settings,
+                capture,
+              });
+              const data = await capture.promise;
+              const png = own(allocate("label"));
               png.create();
               png.write(data, { encoding: "base64" });
-              temporary.push(png);
-              const composed = await ImageManipulator.manipulate(
-                png.uri,
-              ).renderAsync();
-              const jpeg = await composed.saveAsync({
-                format: SaveFormat.JPEG,
-                compress: 0.97,
-              });
+              const jpeg = await prepareDisclosureJpeg(
+                () => jpegContext(png.uri),
+                (path) => {
+                  own(new File(path));
+                },
+                controller.signal,
+                { compress: 0.97, base64: false, expected: prepared },
+              );
               outputUri = jpeg.uri;
-              temporary.push(new File(jpeg.uri));
             }
-            const final = new File(
-              Paths.cache,
-              `Furnio-${Crypto.randomUUID()}.jpg`,
-            );
-            new File(outputUri).copy(final);
+            const final = own(allocate("final"));
+            await new File(outputUri).copy(final);
+            if (controller.signal.aborted || !mounted.current)
+              throw new DisclosureExportError(
+                "The photo export was cancelled.",
+              );
+            if (!final.exists || final.size <= 0)
+              throw new DisclosureExportError(
+                "The finished photo could not be copied. Check available storage and try again.",
+              );
             return final;
+          } catch (error) {
+            if (error instanceof DisclosureExportError) throw error;
+            throw new DisclosureExportError(
+              "The photo could not be exported. Check your disclosure settings and available storage, then try again.",
+            );
           } finally {
-            capture.current = null;
-            setSource(null);
-            for (const file of temporary) if (file.exists) file.delete();
+            controller.abort();
+            active.current = null;
+            if (mounted.current) setSource(null);
           }
         },
       }),
@@ -268,6 +408,7 @@ export const DisclosureRenderer = forwardRef<DisclosureHandle>(
       >
         {!!source && (
           <Svg
+            key={source.id}
             ref={svg}
             width={1}
             height={1}
@@ -277,12 +418,14 @@ export const DisclosureRenderer = forwardRef<DisclosureHandle>(
               href={`data:image/jpeg;base64,${source.base64}`}
               width={source.width}
               height={source.height}
-              onLoad={() => capture.current?.()}
+              onLoad={() => source.capture.ready("image")}
             />
             <DisclosureText
               settings={source.settings}
               width={source.width}
               height={source.height}
+              onReady={() => source.capture.ready("text")}
+              onError={source.capture.fail}
             />
           </Svg>
         )}

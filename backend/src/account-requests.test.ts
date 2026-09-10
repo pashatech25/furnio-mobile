@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "./index";
 import { manageAccountDeletionRequest } from "./account-deletion";
 import { requireRecentAccountAuth } from "./recent-auth";
+import { accountPrivacyLimitFixture } from "../tests/account-rate-limit-fixture";
 vi.mock("./recent-auth", () => ({ requireRecentAccountAuth: vi.fn() }));
 const id = "11111111-1111-4111-8111-111111111111";
 const user = "22222222-2222-4222-8222-222222222222";
 const session = "33333333-3333-4333-8333-333333333333";
 const secret = "9d".repeat(32);
 const env = {
+  ...accountPrivacyLimitFixture(),
   ENVIRONMENT: "staging",
   SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst",
   SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
@@ -50,7 +52,11 @@ function req(
 ) {
   return new Request(`https://mobile.test/v1/account/deletion/${action}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": "192.0.2.1",
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
 }
@@ -68,6 +74,130 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account deletion request boundary", () => {
+  it("rejects source abuse before reading the body, authenticating, or calling the database", async () => {
+    auth();
+    const fetcher = vi.fn();
+    const request = req("prepare", { text: "x".repeat(5000) });
+    await expect(
+      manageAccountDeletionRequest(
+        request,
+        "prepare",
+        {
+          ...env,
+          ACCOUNT_DELETION_SOURCE_LIMIT: {
+            limit: async () => ({ success: false }),
+          },
+        },
+        fetcher,
+      ),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(request.bodyUsed).toBe(false);
+    expect(requireRecentAccountAuth).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each(["prepare", "cancel"] as const)(
+    "blocks excessive %s calls by verified account before the database",
+    async (action) => {
+      auth();
+      const fetcher = vi.fn();
+      const userLimit = vi.fn(async () => ({ success: false }));
+      await expect(
+        manageAccountDeletionRequest(
+          req(action),
+          action,
+          {
+            ...env,
+            ACCOUNT_DELETION_USER_LIMIT: { limit: userLimit },
+          },
+          fetcher,
+        ),
+      ).rejects.toMatchObject({ status: 429 });
+      expect(requireRecentAccountAuth).toHaveBeenCalledOnce();
+      expect(userLimit).toHaveBeenCalledOnce();
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it("cannot trust a claimed account or consume a user counter before recent authentication", async () => {
+    vi.mocked(requireRecentAccountAuth).mockRejectedValue(
+      new Error("Sign in again"),
+    );
+    const userLimit = vi.fn(async () => ({ success: true }));
+    const fetcher = vi.fn();
+    await expect(
+      manageAccountDeletionRequest(
+        req(),
+        "prepare",
+        {
+          ...env,
+          ACCOUNT_DELETION_USER_LIMIT: { limit: userLimit },
+        },
+        fetcher,
+      ),
+    ).rejects.toThrow("Sign in again");
+    expect(userLimit).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("still limits receipt-only status after sign-out and rollback, with safe retry headers and logs", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const response = await worker.fetch(req("status"), {
+      ...env,
+      MOBILE_ACCOUNT_REQUESTS_ENABLED: "false",
+      ACCOUNT_DELETION_RECEIPT_LIMIT: {
+        limit: async () => ({ success: false }),
+      },
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      error:
+        "Too many account privacy requests. Please wait one minute and try again.",
+    });
+    expect(requireRecentAccountAuth).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    for (const value of [
+      id,
+      secret,
+      "192.0.2.1",
+      env.ACCOUNT_DELETION_LIMIT_SECRET,
+    ])
+      expect(JSON.stringify(log.mock.calls)).not.toContain(value);
+  });
+  it("fails closed without a configured limiter and does not expose upstream errors", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const response = await worker.fetch(req("status"), {
+      ...env,
+      ACCOUNT_DELETION_SOURCE_LIMIT: {
+        limit: async () => {
+          throw new Error(`${secret} ${user}`);
+        },
+      },
+    });
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe(null);
+    const body = await response.text();
+    expect(body).not.toContain(secret);
+    expect(body).not.toContain(user);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("never calls the database when source configuration is missing", async () => {
+    const fetcher = vi.fn();
+    await expect(
+      manageAccountDeletionRequest(
+        req("status"),
+        "status",
+        {
+          ...env,
+          ACCOUNT_DELETION_LIMIT_SECRET: undefined,
+        },
+        fetcher,
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it("prepares with verified identity and only a hash of the receipt, but cannot enable deletion", async () => {
     auth();
     const fetcher = vi.fn(async () => Response.json(prepared));

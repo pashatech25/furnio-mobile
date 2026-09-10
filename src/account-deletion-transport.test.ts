@@ -64,7 +64,7 @@ describe("private account transport", () => {
     );
     await expect(
       request("review", z.unknown(), "fixture-token"),
-    ).rejects.toThrow("not enabled");
+    ).rejects.toThrow("temporarily unavailable");
     await expect(
       request("review", z.unknown(), "fixture-token"),
     ).rejects.not.toThrow("secret");
@@ -78,6 +78,37 @@ describe("private account transport", () => {
       "safety limit",
     );
   });
+  it.each([429, 503])(
+    "preserves uncertainty and never retries status %s or displays the server body",
+    async (status) => {
+      const fetcher = vi.fn(async () =>
+        Response.json(
+          { error: "private-proxy-details" },
+          {
+            status,
+            headers: { "Retry-After": "60" },
+          },
+        ),
+      );
+      const request = createDeletionTransport(
+        "https://mobile.fixture",
+        fetcher,
+      );
+      const error = await request(
+        "status",
+        z.unknown(),
+        null,
+        capability,
+      ).catch((error) => error);
+      expect(error.status).toBe(status);
+      expect(error.message).toContain(
+        status === 429 ? "Wait one minute" : "check status later",
+      );
+      expect(error.message).not.toContain("not been deleted");
+      expect(error.message).not.toContain("private-proxy-details");
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
   it("never retries an interrupted confirmation or includes its secret in the error", async () => {
     const fetcher = vi.fn(async () => {
       throw new Error("secret URL");

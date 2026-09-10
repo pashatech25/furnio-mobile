@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createDeletionJournal } from "./account-deletion-journal";
+import { AccountPrivacyError } from "./account-deletion-transport";
 const user = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
 const now = Date.parse("2026-09-09T08:00:10Z");
@@ -86,6 +87,25 @@ const explicit = {
   acknowledgeBilling: true,
 };
 describe("durable native deletion confirmation", () => {
+  it.each([429, 503])(
+    "keeps the receipt unchanged after a status %s response without retrying",
+    async (status) => {
+      const f = fixture();
+      await f.journal.prepare(user);
+      const before = await f.journal.read(user);
+      f.send.mockRejectedValueOnce(
+        new AccountPrivacyError("Check status later", status),
+      );
+      await expect(f.journal.refresh(user)).rejects.toMatchObject({ status });
+      expect(await f.journal.read(user)).toEqual(before);
+      expect(f.send).toHaveBeenCalledTimes(2);
+      expect(f.send.mock.calls.map(([action]) => action)).toEqual([
+        "prepare",
+        "status",
+      ]);
+      expect(f.storage.setItem).toHaveBeenCalledTimes(2);
+    },
+  );
   it("stores receipt capability before contacting the server and omits review/nonce from storage", async () => {
     const f = fixture();
     await f.journal.prepare(user);

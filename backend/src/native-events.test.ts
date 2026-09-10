@@ -274,6 +274,40 @@ describe("durable native event delivery", () => {
   });
 });
 describe("privileged database transport", () => {
+  it("preserves the global receiver required by the real Worker fetch", async () => {
+    const fetcher = vi.fn<typeof fetch>(async function (this: unknown) {
+      expect(this).toBe(globalThis);
+      return Response.json(null);
+    });
+    await expect(
+      new NativeDatabase(environment(), fetcher).rpc(
+        "get_mobile_billing_snapshot",
+        {},
+        z.null(),
+      ),
+    ).resolves.toBeNull();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it.each([301, 302, 303, 307, 308])(
+    "rejects an RPC redirect (%s), even with a valid-shaped body",
+    async (status) => {
+      const fetcher = vi.fn<typeof fetch>(async () =>
+        Response.json(null, {
+          status,
+          headers: { Location: "https://foreign.invalid" },
+        }),
+      );
+      await expect(
+        new NativeDatabase(environment(), fetcher).rpc(
+          "note_native_purchase_event_failure",
+          {},
+          z.null(),
+        ),
+      ).rejects.toMatchObject({ status: 503 });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    },
+  );
   it("cannot point staging at production or an arbitrary credential-collecting URL", () => {
     expect(
       () =>
@@ -300,7 +334,7 @@ describe("privileged database transport", () => {
     );
     expect(fetcher).toHaveBeenCalledWith(
       "https://abcdefghijklmnopqrst.supabase.co/rest/v1/rpc/note_native_purchase_event_failure",
-      expect.objectContaining({ redirect: "error" }),
+      expect.objectContaining({ redirect: "manual" }),
     );
     expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty(
       "Authorization",

@@ -114,7 +114,7 @@ export async function requireRecentAccountAuth(
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       },
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
   } catch {

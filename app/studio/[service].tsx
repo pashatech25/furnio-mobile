@@ -1,22 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Pressable, View } from "react-native";
+import { Image, Modal, Pressable, View } from "react-native";
+import { ProcessingAnimation } from "../../src/ProcessingAnimation";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Crypto from "expo-crypto";
 import { ImagePlus } from "lucide-react-native";
-import { demo } from "../../src/config";
-import {
-  getService,
-  parseServiceRequest,
-  type ServiceId,
-} from "../../src/services";
-import { api, useApp } from "../../src/state";
-import {
-  choosePhotos,
-  chooseFloorplan,
-  uploadPhoto,
-  uploadMask,
-  type LocalPhoto,
-} from "../../src/media";
+import { VisualChoiceRail } from "../../src/VisualChoiceRail";
+import { roomTypeOptions, furnitureStyleOptions, moodOptions, twilightVisualOptions } from "../../src/creative-options";
+import { config, demo } from "../../src/config";
+import { getService } from "../../src/services";
+import { useApp } from "../../src/state";
+import { fileBytes, type LocalPhoto } from "../../src/media";
+import { usePhotoInputs } from "../../src/media/use-photo-inputs";
 import {
   stageJobResponseSchema,
   type ExteriorEnhancementOption,
@@ -34,10 +28,36 @@ import {
   discardDraft,
   type Draft,
 } from "../../src/drafts";
-import { canUseTrialPreview } from "../../src/api/funding";
-import { ApiError } from "../../src/api/client";
+import { canUseTrialPreview, hasServiceCredits, isServiceLocked } from "../../src/api/funding";
+import { TrialAllowance } from "../../src/TrialAllowance";
+import { ApiError, createApi } from "../../src/api/client";
+import { createMediaUploads } from "../../src/api/media-upload";
+import {
+  OperationStopped,
+  type OperationScope,
+} from "../../src/auth/operation-scope";
+import { useEditOperation } from "../../src/editor/use-edit-operation";
+import {
+  submissionJournal,
+  submissionScope,
+} from "../../src/editor/native-submission-journal";
+import type { SubmissionReceipt } from "../../src/editor/submission-journal";
+import {
+  lookupSubmission,
+  submitWithReceipt,
+} from "../../src/editor/submission-recovery";
 import { quotedJobEndpoint } from "../../src/api/credit-quote";
 import { normalizedPoint } from "../../src/editor/geometry";
+import {
+  appendFurniture,
+  nudgeFurniturePin,
+  removeFurniture,
+} from "../../src/editor/furniture-selection";
+import {
+  studioRequest,
+  validateStudioInput,
+  type UploadedMask,
+} from "../../src/editor/studio-input";
 import {
   Body,
   Button,
@@ -60,6 +80,8 @@ export default function Studio() {
   }>();
   const service = getService(params.service);
   const app = useApp();
+  const { choosePhotos, chooseFloorplan } = usePhotoInputs(app.user?.id);
+  const beginOperation = useEditOperation(app.user?.id);
   const show = useDialog();
   const [projectId, setProjectId] = useState(
     params.projectId ?? app.projects[0]?.id ?? "",
@@ -69,11 +91,12 @@ export default function Studio() {
   const [initialRegions, setInitialRegions] = useState<PaintRegion[]>([]);
   const [editorRevision, setEditorRevision] = useState(0);
   const [furniture, setFurniture] = useState<LocalPhoto[]>([]);
-  const [pins, setPins] = useState<{ x: number; y: number }[]>([]);
+  const [pins, setPins] = useState<({ x: number; y: number } | null)[]>([]);
   const [activePin, setActivePin] = useState(0);
   const [anchor, setAnchor] = useState(0);
   const [roomType, setRoomType] = useState("Living room");
-  const [style, setStyle] = useState("Warm contemporary");
+  const [choosingProject, setChoosingProject] = useState(false);
+  const [style, setStyle] = useState("");
   const [mood, setMood] = useState("");
   const [direction, setDirection] = useState("");
   const [preset, setPreset] = useState<TwilightPreset>("natural_dusk");
@@ -81,8 +104,23 @@ export default function Studio() {
     "blue_sky",
   ]);
   const [busy, setBusy] = useState(false);
+  const [painting, setPainting] = useState(false);
   const [phase, setPhase] = useState("");
   const [uncertain, setUncertain] = useState(false);
+  const [receiptState, setReceiptState] = useState<{
+    owner: string | undefined;
+    loading: boolean;
+    receipt: SubmissionReceipt | null;
+    error: boolean;
+  }>({ owner: undefined, loading: !demo, receipt: null, error: false });
+  const pendingReceipt =
+    receiptState.owner === app.user?.id ? receiptState.receipt : null;
+  const recoveryBlocked =
+    !demo &&
+    (receiptState.owner !== app.user?.id ||
+      receiptState.loading ||
+      receiptState.error ||
+      pendingReceipt !== null);
   const [pinLayout, setPinLayout] = useState({ width: 0, height: 0 });
   const mask = useRef<MaskHandle>(null);
   const locked = useRef(false);
@@ -102,6 +140,83 @@ export default function Studio() {
     app.billing?.balance ?? null,
     cost,
   );
+  const accessLocked = isServiceLocked(app.trial, service?.id ?? "", app.billing?.balance ?? null, cost);
+  const canFund = trialAvailable || hasServiceCredits(app.billing?.balance ?? null, cost);
+  useEffect(() => {
+    let active = true;
+    const owner = app.user?.id;
+    setUncertain(false);
+    setReceiptState({ owner, loading: !demo, receipt: null, error: false });
+    if (!demo && owner) {
+      void submissionScope()
+        .then((scope) => submissionJournal.load(scope, owner))
+        .then((receipt) => {
+          if (active)
+            setReceiptState({ owner, loading: false, receipt, error: false });
+        })
+        .catch(() => {
+          if (active)
+            setReceiptState({
+              owner,
+              loading: false,
+              receipt: null,
+              error: true,
+            });
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [app.user?.id]);
+
+  async function checkPreviousSubmission() {
+    if (!app.user || locked.current || demo) return;
+    const owner = app.user.id;
+    let operation: OperationScope | undefined;
+    locked.current = true;
+    setBusy(true);
+    try {
+      operation = beginOperation();
+      await operation.getToken();
+      const scope = await submissionScope();
+      const receipt = await submissionJournal.load(scope, owner);
+      operation.assertCurrent();
+      setReceiptState({ owner, loading: false, receipt, error: false });
+      setUncertain(false);
+      if (!receipt) return;
+      const request = createApi(
+        config.platform,
+        operation.getToken,
+        fetch,
+        operation,
+      );
+      const result = await lookupSubmission(request, receipt);
+      operation.assertCurrent();
+      if (result.state !== "found") {
+        show(
+          "Still checking this edit",
+          "An exact submission could not be confirmed yet. No new job was sent. Check this project’s history or contact support before sending these photos again.",
+        );
+        return;
+      }
+      // Retain the receipt through navigation; Result acknowledges it after rendering.
+      void discardDraft(owner, receipt.service).catch(() => undefined);
+      router.replace({
+        pathname: "/result/[jobId]",
+        params: { jobId: result.jobId, projectId: receipt.projectId },
+      });
+    } catch (error) {
+      if (operation && !operation.current) return;
+      show(
+        "Submission check unavailable",
+        "Keep the saved receipt. Check your project history or try this status check later. This does not submit another edit.",
+      );
+    } finally {
+      locked.current = false;
+      if (operation?.current) setBusy(false);
+      operation?.dispose();
+    }
+  }
   useEffect(() => {
     let active = true;
     if (app.user && service && !demo)
@@ -156,7 +271,10 @@ export default function Studio() {
     locked.current = true;
     setBusy(true);
     setPhase("Saving a private draft on this device…");
+    let operation: OperationScope | undefined;
     try {
+      operation = beginOperation();
+      await operation.getToken();
       const saved = await saveDraft(app.user.id, service.id, {
         projectId,
         files,
@@ -174,6 +292,7 @@ export default function Studio() {
         options,
         maskRegions: mask.current?.snapshot() ?? [],
       });
+      operation.assertCurrent();
       // Preserve any reordering/new selection made while device storage was busy.
       const copies = new Map(
         [...files, ...furniture].map((photo, index) => [
@@ -192,30 +311,44 @@ export default function Studio() {
         "Reopen this service within 48 hours to restore it. Signing out or switching accounts removes this draft and its private photo copies. Your device may also clear cached photos. Nothing has been uploaded.",
       );
     } catch (error) {
+      if (
+        error instanceof OperationStopped ||
+        (operation && !operation.current)
+      )
+        return;
       show(
         "Draft could not be saved",
         error instanceof Error ? error.message : "Keep the editor open.",
       );
     } finally {
       locked.current = false;
-      setBusy(false);
+      if (operation?.current) {
+        setBusy(false);
+        setPhase("");
+      }
+      operation?.dispose();
     }
   }
   async function select(kind: "room" | "camera" | "furniture" | "pdf") {
     if (locked.current) return;
+    if (kind === "furniture" && furniture.length >= 5) return;
+    locked.current = true;
+    let operation: OperationScope | undefined;
     try {
+      operation = beginOperation();
+      if (!demo) await operation.getToken();
       const picked =
         kind === "pdf"
           ? await chooseFloorplan()
           : await choosePhotos(
-              kind === "furniture" ? 5 : (service?.max ?? 1),
+              kind === "furniture" ? 5 - furniture.length : (service?.max ?? 1),
               kind === "camera",
             );
+      operation.assertCurrent();
       if (!picked.length) return;
       if (kind === "furniture") {
-        setFurniture(picked);
-        setPins([]);
-        setActivePin(0);
+        setFurniture(appendFurniture(furniture, picked));
+        setActivePin(furniture.length);
       } else {
         setFiles(picked);
         setInitialRegions([]);
@@ -223,43 +356,71 @@ export default function Studio() {
         setAnchor(0);
         setPins([]);
       }
-      setUncertain(false);
     } catch (error) {
+      if (
+        error instanceof OperationStopped ||
+        (operation && !operation.current)
+      )
+        return;
       show(
         "Choose another file",
         error instanceof Error
           ? error.message
           : "The file could not be opened.",
       );
+    } finally {
+      locked.current = false;
+      operation?.dispose();
     }
   }
   async function submit() {
-    if (!service || !feature || locked.current) return;
-    if (!projectId) {
-      show(
-        "Choose a project first",
-        "Create a property project to keep your original photos and results together.",
-      );
-      return;
-    }
-    if (files.length < service.min || files.length > service.max) {
-      show(
-        "Add your photos",
-        `This service needs ${service.min === service.max ? service.min : `${service.min}–${service.max}`} source photo${service.max > 1 ? "s" : ""}.`,
-      );
-      return;
-    }
     if (
-      isReference &&
-      (!furniture.length || pins.filter(Boolean).length !== furniture.length)
-    ) {
+      !service ||
+      !feature ||
+      !app.user ||
+      locked.current ||
+      uncertain ||
+      recoveryBlocked
+    )
+      return;
+    let operation: OperationScope;
+    try {
+      operation = beginOperation();
+    } catch {
+      return;
+    }
+    const form = {
+      projectId,
+      files,
+      furniture,
+      pins,
+      anchor,
+      roomType,
+      style,
+      mood,
+      direction,
+      preset,
+      options,
+    };
+    try {
+      validateStudioInput(service.id, form, mask.current?.snapshot() ?? []);
+    } catch (error) {
+      operation.dispose();
       show(
-        "Place every piece",
-        "Add your furniture photos and tap the room photo to place each numbered piece.",
+        "Check your edit",
+        error instanceof Error
+          ? error.message
+          : "Check the selected photos and service settings.",
       );
       return;
     }
     locked.current = true;
+    if (!demo && (accessLocked || !canFund)) {
+      locked.current = false;
+      operation.dispose();
+      show("Service unavailable", "This edit is not covered by your current trial allowance or available credits.");
+      return;
+    }
     const confirmedCredits = trialAvailable ? 0 : cost;
     setBusy(true);
     try {
@@ -270,11 +431,37 @@ export default function Studio() {
         });
         return;
       }
+      await operation.getToken();
+      const receiptScope = await submissionScope();
+      const existing = await submissionJournal.load(receiptScope, app.user.id);
+      operation.assertCurrent();
+      if (existing) {
+        setReceiptState({
+          owner: app.user.id,
+          loading: false,
+          receipt: existing,
+          error: false,
+        });
+        return;
+      }
+      const request = createApi(
+        config.platform,
+        operation.getToken,
+        fetch,
+        operation,
+      );
+      const { uploadPhoto, uploadMask } = createMediaUploads({
+        api: request,
+        readBytes: fileBytes,
+        boundary: operation,
+      });
       setPhase("Preparing your photo and selections…");
       const regions = isMask ? await mask.current?.export() : null;
+      operation.assertCurrent();
       const group = isMulti ? Crypto.randomUUID() : undefined;
       const uploaded = [];
       for (const [index, file] of files.entries()) {
+        operation.assertCurrent();
         setPhase(`Uploading source ${index + 1} of ${files.length}…`);
         uploaded.push(
           await uploadPhoto(
@@ -291,83 +478,73 @@ export default function Studio() {
           ),
         );
       }
-      const assetId = uploaded[0]!.assetId;
-      let input: unknown;
-      switch (service.id) {
-        case "virtual_staging":
-          input = { assetId, roomType, style, mood, direction };
-          break;
-        case "multiview":
-          input = {
-            assetIds: uploaded.map((item) => item.assetId),
-            anchorAssetId: uploaded[anchor]!.assetId,
-            roomType,
-            style,
-            mood,
-            direction,
-          };
-          break;
-        case "twilight":
-          input = { assetId, feature: service.id, preset };
-          break;
-        case "winter_to_summer":
-          input = { assetId, feature: service.id };
-          break;
-        case "exterior_enhancement":
-          input = { assetId, feature: service.id, options };
-          break;
-        case "floor_plan":
-          input = { assetId };
-          break;
-        case "reference_furniture": {
-          const furnitureIds = [];
-          for (const photo of furniture)
-            furnitureIds.push(
-              (
-                await uploadPhoto(photo, projectId, service.id, {
-                  countsTowardPhotoLimit: false,
-                })
-              ).assetId,
-            );
-          input = {
-            assetId,
-            direction,
-            furnitureAssetIds: furnitureIds,
-            placements: furnitureIds.map((id, index) => ({
-              furnitureAssetId: id,
-              ...pins[index],
-            })),
-          };
-          break;
-        }
-        case "item_removal":
-        case "custom_staging": {
-          if (!regions?.length) throw new Error("Paint at least one area.");
-          const uploadedRegions = [];
-          for (const region of regions)
-            uploadedRegions.push({
-              bbox: region.bbox,
-              operation: region.operation,
-              instruction: region.instruction,
-              regionIndex: region.regionIndex,
-              maskKey: await uploadMask(region.binary, service.id),
-              compositeMaskKey: await uploadMask(region.composite, service.id),
-            });
-          input = {
-            assetId,
-            mode: service.id === "item_removal" ? "remove" : "custom",
-            regions: uploadedRegions,
-          };
-          break;
-        }
+      const furnitureIds: string[] = [];
+      if (isReference) {
+        for (const photo of furniture)
+          furnitureIds.push(
+            (
+              await uploadPhoto(photo, projectId, service.id, {
+                countsTowardPhotoLimit: false,
+              })
+            ).assetId,
+          );
       }
-      setPhase("Submitting your edit with Furnio’s server-side instructions…");
-      const job = await api(
-        quotedJobEndpoint(service.endpoint),
-        stageJobResponseSchema,
-        parseServiceRequest(service.id, input),
-        { expectedCredits: confirmedCredits },
+      const uploadedRegions: UploadedMask[] = [];
+      if (service.id === "item_removal" || service.id === "custom_staging") {
+        if (!regions?.length) throw new Error("Paint at least one area.");
+        for (const region of regions)
+          uploadedRegions.push({
+            bbox: region.bbox,
+            operation: region.operation,
+            instruction: region.instruction,
+            regionIndex: region.regionIndex,
+            maskKey: await uploadMask(region.binary, service.id),
+            compositeMaskKey: await uploadMask(region.composite, service.id),
+          });
+      }
+      const input = studioRequest(
+        service.id,
+        form,
+        uploaded.map((item) => item.assetId),
+        furnitureIds,
+        uploadedRegions,
       );
+      operation.assertCurrent();
+      setPhase("Submitting your edit with Furnio’s server-side instructions…");
+      const receipt: SubmissionReceipt = {
+        version: 1,
+        id: Crypto.randomUUID(),
+        userId: app.user.id,
+        scope: receiptScope,
+        projectId,
+        service: service.id,
+        startedAt: Date.now(),
+        sourceIds: uploaded.map((item) => item.assetId),
+        referenceIds: furnitureIds,
+        anchorId: isMulti ? uploaded[anchor]!.assetId : null,
+      };
+      // Confirm the independent recovery route is available before the first paid dispatch.
+      const prior = await lookupSubmission(request, receipt);
+      operation.assertCurrent();
+      if (prior.state !== "not_found") {
+        await submissionJournal.claim(receipt);
+        throw new Error(
+          "These uploads already have a submission to review. Use the status check above.",
+        );
+      }
+      const job = await submitWithReceipt({
+        journal: submissionJournal,
+        receipt,
+        assertCurrent: operation.assertCurrent,
+        send: (onDispatch) =>
+          request(
+            quotedJobEndpoint(service.endpoint),
+            stageJobResponseSchema,
+            input,
+            { expectedCredits: confirmedCredits, onDispatch },
+          ),
+      });
+      operation.assertCurrent();
       // Server acceptance is final even if local draft cleanup fails.
       // Never suggest resubmitting a paid job because device storage is full.
       if (app.user)
@@ -378,26 +555,51 @@ export default function Studio() {
         params: { jobId: job.jobId, projectId },
       });
     } catch (error) {
+      if (
+        error instanceof OperationStopped ||
+        (operation && !operation.current)
+      )
+        return;
+      try {
+        const receipt = await submissionJournal.load(
+          await submissionScope(),
+          app.user.id,
+        );
+        operation.assertCurrent();
+        setReceiptState({
+          owner: app.user.id,
+          loading: false,
+          receipt,
+          error: false,
+        });
+        setUncertain(receipt !== null);
+      } catch {
+        if (!operation.current) return;
+        setReceiptState({
+          owner: app.user.id,
+          loading: false,
+          receipt: null,
+          error: true,
+        });
+        setUncertain(true);
+      }
       if (error instanceof ApiError && error.code === "CREDIT_QUOTE_CHANGED") {
         await app.refresh();
+        if (!operation?.current) return;
         show("Please review the updated cost", error.message);
         return;
       }
-      if (
-        error &&
-        typeof error === "object" &&
-        "uncertain" in error &&
-        error.uncertain
-      )
-        setUncertain(true);
       show(
         "Your edit needs attention",
         error instanceof Error ? error.message : "Please check your project.",
       );
     } finally {
       locked.current = false;
-      setBusy(false);
-      setPhase("");
+      if (operation?.current) {
+        setBusy(false);
+        setPhase("");
+      }
+      operation?.dispose();
     }
   }
   if (!service)
@@ -407,17 +609,89 @@ export default function Studio() {
         <Notice>Please choose a currently enabled service.</Notice>
       </Page>
     );
+  if (!demo && accessLocked && !pendingReceipt && !uncertain) return <Page back title={service.name}><TrialAllowance /><Notice>This service is not available with your current trial or credit balance.</Notice></Page>;
   return (
     <Page
       back
+      scrollEnabled={!painting}
+      footer={
+      <Button
+        title={
+          demo
+            ? "Preview the processing experience"
+            : trialAvailable
+              ? "Create trial preview"
+              : `Create · ${cost} credits`
+        }
+        disabled={!feature || uncertain || recoveryBlocked || busy || (!demo && !canFund)}
+        busy={busy}
+        onPress={() =>
+          show(
+            demo ? "Preview this edit?" : "Ready to transform?",
+            demo
+              ? "This simulates processing using a sample result. No file is uploaded and no credits are spent."
+              : `Your selected files will be uploaded for AI processing using Furnio’s service providers and Admin instructions. ${trialAvailable ? "Trial eligibility is checked by the server." : `${cost} credits will be reserved.`}`,
+            [
+              { title: "Keep editing", secondary: true },
+              {
+                title: demo ? "Run demo" : "Upload and create",
+                action: () => void submit(),
+              },
+            ],
+          )
+        }
+        icon
+      />
+      }
       title={service.name}
       right={<Pill>{app.billing?.balance ?? "—"} credits</Pill>}
     >
-      <Heading>
-        {isReference ? "Place it. Make it yours." : "Your photo.\n"}
-        {!isReference && "A fresh perspective."}
-      </Heading>
-      <Body muted>{service.instruction}</Body>
+      <TrialAllowance />
+      <Modal visible={busy} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={{ flex: 1, backgroundColor: "#111d17f5", justifyContent: "center", padding: 24 }}>
+          <ProcessingAnimation label="Preparing and submitting your photo…" />
+        </View>
+      </Modal>
+      <View accessibilityLabel={files.length ? "Photo selected. Set your direction, then confirm." : "Choose a photo, set your direction, then confirm."} style={{ flexDirection: "row", gap: 7 }}>
+        {[0, 1, 2].map(index => <View key={index} style={{ flex: 1, height: 3, borderRadius: 4, backgroundColor: index === 0 || (index === 1 && files.length > 0) ? colors.ink : colors.line }} />)}
+      </View>
+      <Heading>{isReference ? "Place it.\nPicture it." : "Your room.\nYour direction."}</Heading>
+      <Body muted style={{ fontSize: 13 }}>{service.instruction}</Body>
+      {recoveryBlocked && (
+        <Card>
+          <Heading small>
+            {receiptState.loading
+              ? "Checking your last edit…"
+              : "Let’s find your last edit."}
+          </Heading>
+          <Body muted>
+            {receiptState.loading
+              ? "Checking this device’s saved submission receipt."
+              : "A previous submission needs confirmation. It may already be processing. Checking its status never sends another image job or spends credits."}
+          </Body>
+          {!receiptState.loading && (
+            <Button
+              title="Check submission status"
+              secondary
+              disabled={busy}
+              onPress={() => void checkPreviousSubmission()}
+            />
+          )}
+          {pendingReceipt && (
+            <Button
+              title="Open this project’s history"
+              secondary
+              disabled={busy}
+              onPress={() =>
+                router.push({
+                  pathname: "/project/[id]",
+                  params: { id: pendingReceipt.projectId },
+                })
+              }
+            />
+          )}
+        </Card>
+      )}
       {recoverable && (
         <Card>
           <Heading small>Pick up where you left off.</Heading>
@@ -443,13 +717,15 @@ export default function Studio() {
         </Notice>
       )}
       <Label>Property project</Label>
+      <Button title={app.projects.find(project => project.id === projectId)?.name ?? "Choose a property"} secondary disabled={busy} onPress={() => setChoosingProject(value => !value)} />
+      {(choosingProject || !projectId) && <>
       <View style={{ gap: 8 }}>
         {app.projects.map((project) => (
           <Pressable
             key={project.id}
             accessibilityRole="button"
             accessibilityState={{ selected: project.id === projectId }}
-            onPress={() => setProjectId(project.id)}
+            onPress={() => { setProjectId(project.id); setChoosingProject(false); }}
             style={{
               padding: 14,
               borderRadius: 13,
@@ -468,6 +744,7 @@ export default function Studio() {
         secondary
         onPress={() => router.push("/new-project")}
       />
+      </>}
       {!files.length ? (
         <Card
           style={{
@@ -493,6 +770,7 @@ export default function Studio() {
             ) : (
               !isMask && (
                 <Pressable
+                  disabled={busy}
                   accessibilityRole={isReference ? "button" : "image"}
                   accessibilityLabel={
                     isReference
@@ -503,12 +781,20 @@ export default function Studio() {
                   onPress={(event) => {
                     if (isReference && furniture.length) {
                       const next = [...pins];
-                      next[activePin] = normalizedPoint(
-                        event.nativeEvent.locationX,
-                        event.nativeEvent.locationY,
-                        pinLayout.width,
-                        pinLayout.height,
-                      );
+                      try {
+                        next[activePin] = normalizedPoint(
+                          event.nativeEvent.locationX,
+                          event.nativeEvent.locationY,
+                          pinLayout.width,
+                          pinLayout.height,
+                        );
+                      } catch {
+                        show(
+                          "Photo is loading",
+                          "Wait for the room photo to finish opening, then place the piece.",
+                        );
+                        return;
+                      }
                       setPins(next);
                       setActivePin(
                         Math.min(activePin + 1, furniture.length - 1),
@@ -521,10 +807,15 @@ export default function Studio() {
                     borderRadius: 14,
                   }}
                 >
-                  <Image
-                    source={{ uri: file.uri }}
+                  <View
+                    pointerEvents="none"
                     style={{ width: "100%", height: "100%" }}
-                  />
+                  >
+                    <Image
+                      source={{ uri: file.uri }}
+                      style={{ width: "100%", height: "100%" }}
+                    />
+                  </View>
                   {isReference &&
                     pins.map(
                       (pin, i) =>
@@ -595,6 +886,7 @@ export default function Studio() {
                 photo={file}
                 custom={service.id === "custom_staging"}
                 initialRegions={initialRegions}
+                onDrawingChange={setPainting}
               />
             )}
             <Body muted style={{ fontSize: 12 }}>
@@ -606,6 +898,7 @@ export default function Studio() {
       <Button
         title={files.length ? "Choose different photos" : "Choose photos"}
         secondary
+        disabled={busy}
         onPress={() => void select("room")}
       />
       {!isMulti && (
@@ -616,6 +909,7 @@ export default function Studio() {
               : "Take a photo"
           }
           secondary
+          disabled={busy}
           onPress={() =>
             void select(service.id === "floor_plan" ? "pdf" : "camera")
           }
@@ -624,8 +918,13 @@ export default function Studio() {
       {isReference && (
         <>
           <Button
-            title="Add furniture photos (1–5)"
+            title={
+              furniture.length === 5
+                ? "Five furniture pieces selected"
+                : `Add furniture photos (${5 - furniture.length} remaining)`
+            }
             secondary
+            disabled={busy || furniture.length >= 5}
             onPress={() => void select("furniture")}
           />
           <View style={[styles.row, { flexWrap: "wrap" }]}>
@@ -633,6 +932,9 @@ export default function Studio() {
               <Pressable
                 key={photo.uri}
                 accessibilityRole="button"
+                accessibilityLabel={`Piece ${index + 1}, ${pins[index] ? "placed" : "not placed"}`}
+                accessibilityState={{ selected: activePin === index }}
+                disabled={busy}
                 onPress={() => setActivePin(index)}
                 style={{
                   borderWidth: 2,
@@ -654,79 +956,110 @@ export default function Studio() {
             ))}
           </View>
           {!!furniture.length && (
-            <Notice>
-              Tap the room photo to place piece {activePin + 1}. Each pin uses
-              image-relative coordinates.
-            </Notice>
+            <Card>
+              <Label>
+                Piece {activePin + 1} ·{" "}
+                {pins[activePin] ? "Placed" : "Not placed yet"}
+              </Label>
+              <Body muted>
+                Tap the room photo to place this piece. Select a different piece
+                above to move its pin. Adding another photo keeps your existing
+                placements.
+              </Body>
+              {pins[activePin] && (
+                <Body muted>
+                  Position: {Math.round(pins[activePin]!.x * 100)}% from the
+                  left, {Math.round(pins[activePin]!.y * 100)}% from the top.
+                </Body>
+              )}
+              <Button
+                title={`Place piece ${activePin + 1} at photo center`}
+                secondary
+                disabled={busy}
+                onPress={() => {
+                  const next = [...pins];
+                  next[activePin] = { x: 0.5, y: 0.5 };
+                  setPins(next);
+                }}
+              />
+              <View style={[styles.row, { justifyContent: "space-between" }]}>
+                {(
+                  [
+                    ["left", "←"],
+                    ["up", "↑"],
+                    ["down", "↓"],
+                    ["right", "→"],
+                  ] as const
+                ).map(([direction, symbol]) => (
+                  <Pressable
+                    key={direction}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Move piece ${activePin + 1} ${direction}`}
+                    accessibilityState={{ disabled: busy || !pins[activePin] }}
+                    disabled={busy || !pins[activePin]}
+                    style={{
+                      padding: 14,
+                      minWidth: 52,
+                      alignItems: "center",
+                      borderRadius: 12,
+                      backgroundColor: colors.soft,
+                      opacity: pins[activePin] ? 1 : 0.5,
+                    }}
+                    onPress={() =>
+                      setPins((current) =>
+                        current.map((pin, index) =>
+                          index === activePin && pin
+                            ? nudgeFurniturePin(pin, direction)
+                            : pin,
+                        ),
+                      )
+                    }
+                  >
+                    <Body>{symbol}</Body>
+                  </Pressable>
+                ))}
+              </View>
+              <Button
+                title={`Clear placement for piece ${activePin + 1}`}
+                secondary
+                disabled={busy || !pins[activePin]}
+                onPress={() =>
+                  setPins((current) =>
+                    current.map((pin, index) =>
+                      index === activePin ? null : pin,
+                    ),
+                  )
+                }
+              />
+              <Button
+                title={`Remove piece ${activePin + 1}`}
+                secondary
+                disabled={busy}
+                onPress={() => {
+                  const next = removeFurniture(
+                    furniture,
+                    pins,
+                    activePin,
+                    activePin,
+                  );
+                  setFurniture(next.furniture);
+                  setPins(next.pins);
+                  setActivePin(next.active);
+                }}
+              />
+            </Card>
           )}
         </>
       )}
       {(service.id === "virtual_staging" || isMulti) && (
         <>
-          <Field
-            label="Room type"
-            value={roomType}
-            onChangeText={setRoomType}
-            maxLength={80}
-          />
-          <Label>Furniture style</Label>
-          <View style={[styles.row, { flexWrap: "wrap" }]}>
-            {[
-              "Warm contemporary",
-              "Modern",
-              "Scandinavian",
-              "Traditional",
-              "Minimalist",
-            ].map((value) => (
-              <Pressable
-                key={value}
-                accessibilityRole="button"
-                onPress={() => setStyle(value)}
-                style={{
-                  padding: 12,
-                  backgroundColor: style === value ? colors.ink : colors.soft,
-                  borderRadius: 12,
-                }}
-              >
-                <Body
-                  style={{
-                    fontSize: 13,
-                    color: style === value ? colors.paper : colors.ink,
-                  }}
-                >
-                  {value}
-                </Body>
-              </Pressable>
-            ))}
-          </View>
-          <Field
-            label="Style (editable)"
-            value={style}
-            onChangeText={setStyle}
-            maxLength={80}
-          />
-          <Field
-            label="Mood (optional)"
-            value={mood}
-            onChangeText={setMood}
-            maxLength={80}
-          />
+          <VisualChoiceRail label="Room type" options={roomTypeOptions} selected={roomType} onChange={setRoomType} disabled={busy} />
+          <VisualChoiceRail label="Furniture style" options={furnitureStyleOptions} selected={style} onChange={setStyle} disabled={busy} />
+          <VisualChoiceRail label="Mood" options={moodOptions} selected={mood} onChange={setMood} disabled={busy} />
         </>
       )}
       {service.id === "twilight" && (
-        <>
-          <Label>Twilight light</Label>
-          {(["pink_twilight", "blue_hour", "natural_dusk"] as const).map(
-            (value) => (
-              <Button
-                key={value}
-                title={value.replaceAll("_", " ")}
-                secondary={preset !== value}
-                onPress={() => setPreset(value)}
-              />
-            ),
-          )}
-        </>
+<VisualChoiceRail label="Twilight light" options={twilightVisualOptions} images={{ natural_dusk: require("../../assets/twilight-natural-owner.jpg") }} selected={preset} onChange={value => setPreset(value as typeof preset)} disabled={busy} showAll />
       )}
       {service.id === "exterior_enhancement" && (
         <>
@@ -771,6 +1104,13 @@ export default function Studio() {
         </Notice>
       )}
       {!!phase && <Notice>{phase}</Notice>}
+      {busy && !demo && (
+        <Notice>
+          Keep this edit open until submission finishes. Leaving stops further
+          uploads, but a job already accepted by the server can still finish.
+          Check project history before trying again after an interruption.
+        </Notice>
+      )}
       <Button
         title="Save draft on this device"
         secondary
@@ -782,33 +1122,7 @@ export default function Studio() {
           ? "Eligible trial preview. Furnio will confirm availability on the server."
           : `${cost} credits for ${isMulti ? files.length || 2 : 1} output${isMulti ? "s" : ""}. Final eligibility and cost are enforced by the server.`}
       </Notice>
-      <Button
-        title={
-          demo
-            ? "Preview the processing experience"
-            : trialAvailable
-              ? "Create trial preview"
-              : `Create · ${cost} credits`
-        }
-        disabled={!feature || uncertain || busy}
-        busy={busy}
-        onPress={() =>
-          show(
-            demo ? "Preview this edit?" : "Ready to transform?",
-            demo
-              ? "This simulates processing using a sample result. No file is uploaded and no credits are spent."
-              : `Your selected files will be uploaded for AI processing using Furnio’s service providers and Admin instructions. ${trialAvailable ? "Trial eligibility is checked by the server." : `${cost} credits will be reserved.`}`,
-            [
-              { title: "Keep editing", secondary: true },
-              {
-                title: demo ? "Run demo" : "Upload and create",
-                action: () => void submit(),
-              },
-            ],
-          )
-        }
-        icon
-      />
+
     </Page>
   );
 }

@@ -118,10 +118,7 @@ export default function Account() {
           Your account, images and spendable balance are shared with the Furnio
           website.
         </Body>
-        <Button
-          title="Credits & plans"
-          onPress={() => router.push("/wallet")}
-        />
+        <Button title="Your credits" onPress={() => router.push("/wallet")} />
       </Card>
       <Card>
         <View style={styles.between}>
@@ -237,8 +234,8 @@ export default function Account() {
       />
       <Notice>
         Furnio Mobile · Development build 0.1.0
-        {demo ? " · Offline design preview" : ""}. Account deletion and native
-        billing must pass release gates before store submission.
+        {demo ? " · Offline design preview" : ""}. Account privacy and device
+        testing must pass release gates before store submission.
       </Notice>
     </Page>
   );

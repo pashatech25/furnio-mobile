@@ -6,6 +6,7 @@ import Purchases, {
 import { z } from "zod";
 import * as Crypto from "expo-crypto";
 import { demo } from "./config";
+import { nativeCommerceAllowed } from "./commerce-policy";
 import { supabase } from "./auth/client";
 import { mobileApi } from "./state";
 import { capabilitiesSchema } from "./api/schemas";
@@ -21,10 +22,12 @@ import {
 } from "./purchase-journal";
 
 export const purchasesEnabled =
+  nativeCommerceAllowed &&
   !demo &&
   Platform.OS !== "web" &&
   process.env.EXPO_PUBLIC_PURCHASES_ENABLED === "true";
-export const restorationAvailable = !demo && Platform.OS !== "web";
+export const restorationAvailable =
+  nativeCommerceAllowed && !demo && Platform.OS !== "web";
 export const recoveryResultSchema = z.object({
   status: z.enum([
     "synchronized",

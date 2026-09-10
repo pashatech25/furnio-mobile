@@ -2,6 +2,8 @@
 
 Independent React Native / Expo customer application for iOS and Android. This is **not** a WebView wrapper. The web target is only a convenient design/testing preview of the same native components.
 
+**Current scope, 9 September 2026:** website-only purchases, with shared credits in a free companion app. Native commerce is deferred. Read `docs/WEB_PURCHASES_DECISION.md` before any store, backend or database rollout; older native-commerce notes below are historical implementation inventory, not release requirements.
+
 ## Safe start
 
 Use Node 22.13+ and the pinned pnpm 11.19.0. Run `pnpm install --frozen-lockfile`, then `pnpm export:preview && pnpm preview`.
@@ -12,7 +14,7 @@ The compiled design preview is at `http://127.0.0.1:4340/`. Choose **Explore the
 
 Without environment configuration the app runs in a clearly labelled offline demo. It never signs in, sends SMS, buys anything or starts a provider job. Demo balances, jobs and projects are samples.
 
-For real authentication and native purchases use an Expo development build, not Expo Go. Copy `.env.example` to a local ignored `.env` and use approved staging services only. Follow `docs/RELEASE_GATES.md` before production configuration.
+For real authentication/native features use an Expo development build, not Expo Go. Use approved staging services only; local signed-build helpers read the public-only `.env.staging-native.local` file prepared by `scripts/prepare-staging-native.mjs`. Never load server secret files into Expo. Follow `docs/RELEASE_GATES.md` before production configuration. RevenueCat keys and store product setup are not required for this companion release.
 
 ## Verification
 

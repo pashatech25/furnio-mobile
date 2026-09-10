@@ -104,18 +104,23 @@ export class NativeDatabase {
     schema: z.ZodType<T>,
   ): Promise<T> {
     const key = this.env.SUPABASE_SERVICE_ROLE_KEY;
-    const response = await this.fetcher(`${this.base}/rest/v1/rpc/${method}`, {
-      method: "POST",
-      headers: {
-        apikey: key,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(key.startsWith("eyJ") ? { Authorization: `Bearer ${key}` } : {}),
+    // workerd's native fetch requires the global receiver, not this adapter.
+    const response = await this.fetcher.call(
+      globalThis,
+      `${this.base}/rest/v1/rpc/${method}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: key,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(key.startsWith("eyJ") ? { Authorization: `Bearer ${key}` } : {}),
+        },
+        body: JSON.stringify(body),
+        redirect: "manual",
+        signal: AbortSignal.timeout(15_000),
       },
-      body: JSON.stringify(body),
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000),
-    });
+    );
     if (!response.ok) {
       // Do not expose SQL errors, body, account identifiers or privileged URLs.
       let code: string | undefined;

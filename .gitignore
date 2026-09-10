@@ -21,3 +21,9 @@ native-bundles/
 backend/worker-configuration.d.ts
 build/
 output/
+.idea/
+*.p12
+*.p8
+*.mobileprovision
+*.keystore
+*.jks

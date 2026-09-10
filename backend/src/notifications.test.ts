@@ -149,7 +149,7 @@ describe("privacy-safe notifications Worker", () => {
     expect(fetcher).toHaveBeenCalledWith(
       "https://exp.host/--/api/v2/push/send",
       expect.objectContaining({
-        redirect: "error",
+        redirect: "manual",
         headers: expect.objectContaining({
           Authorization: `Bearer ${env.EXPO_ACCESS_TOKEN}`,
         }),

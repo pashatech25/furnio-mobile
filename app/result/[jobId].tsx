@@ -3,14 +3,27 @@ import { AppState, Image, Platform, Pressable, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import Slider from "@react-native-community/slider";
 import Svg from "react-native-svg";
+import { BottomSheet } from "../../src/ui";
 import * as Sharing from "expo-sharing";
-import { File, Paths } from "expo-file-system";
-import * as Crypto from "expo-crypto";
+import { File } from "expo-file-system";
 import { z } from "zod";
 import { api, useApp } from "../../src/state";
-import { demo } from "../../src/config";
+import { config, demo } from "../../src/config";
+import { createApi } from "../../src/api/client";
+import { useEditOperation } from "../../src/editor/use-edit-operation";
+import {
+  submissionJournal,
+  submissionScope,
+} from "../../src/editor/native-submission-journal";
+import { acknowledgeViewedSubmission } from "../../src/editor/submission-recovery";
 import { photos } from "../../src/services";
-import { cleanDownloadUrl } from "../../src/media";
+import { cleanDownloadUrl, type LocalPhoto } from "../../src/media";
+import { resultDownloadPath } from "../../src/results/download-policy";
+import { ProcessingAnimation } from "../../src/ProcessingAnimation";
+import { shouldRefreshAccount } from "../../src/results/account-refresh";
+import { usePhotoInputs } from "../../src/media/use-photo-inputs";
+import { createNativeExportSession } from "../../src/results/native-export-session";
+import { demoExportUri } from "../../src/results/demo-export";
 import {
   jobStatusResponseSchema,
   type JobStatusResponse,
@@ -40,6 +53,7 @@ import {
   colors,
   Heading,
   Kicker,
+  Label,
   Notice,
   Page,
   Pill,
@@ -82,6 +96,8 @@ function ResultScreen({
   previewProcessing?: string;
 }) {
   const app = useApp();
+  const { choosePhotos } = usePhotoInputs(app.user?.id);
+  const beginReceiptOperation = useEditOperation(app.user?.id);
   const show = useDialog();
   const [job, setJob] = useState<JobStatusResponse | null>(
     demo
@@ -89,6 +105,7 @@ function ResultScreen({
       : null,
   );
   const [error, setError] = useState("");
+  const [editingDisclosure, setEditingDisclosure] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [clock, setClock] = useState(Date.now);
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -100,15 +117,45 @@ function ResultScreen({
   const [width, setWidth] = useState(330);
   const [dimensions, setDimensions] = useState({ width: 1500, height: 1000 });
   const [busy, setBusy] = useState(false);
+  const [cleanupPending, setCleanupPending] = useState(false);
+  const exportSession = useRef(createNativeExportSession());
   const [disclosure, setDisclosure] = useState<Disclosure>(defaultDisclosure);
+  const [localTestPhoto, setLocalTestPhoto] = useState<LocalPhoto | null>(null);
   const renderer = useRef<DisclosureHandle>(null);
   const requestGate = useRef(createResultRequestGate());
   const mounted = useRef(true);
+  useEffect(() => {
+    if (demo || !app.user || !job || job.jobId !== jobId) return;
+    let operation: ReturnType<typeof beginReceiptOperation>;
+    try {
+      operation = beginReceiptOperation();
+    } catch {
+      return;
+    }
+    const owner = app.user.id;
+    void submissionScope()
+      .then((scope) =>
+        acknowledgeViewedSubmission({
+          journal: submissionJournal,
+          scope,
+          userId: owner,
+          jobId,
+          api: createApi(config.platform, operation.getToken, fetch, operation),
+          assertCurrent: operation.assertCurrent,
+        }),
+      )
+      .catch(() => undefined)
+      .finally(() => operation.dispose());
+    return () => operation.dispose();
+  }, [app.user?.id, job?.jobId, jobId]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       requestGate.current.invalidate();
+      // An in-flight native share still needs its file. Its own finally block
+      // cleans up after it finishes; idle leftovers get another attempt here.
+      exportSession.current.cleanup();
     };
   }, []);
   const refresh = useCallback(async () => {
@@ -129,6 +176,9 @@ function ResultScreen({
       setClock(Date.now());
       setPreviewRevision((revision) => revision + 1);
       setError("");
+      // Job polling alone leaves the shared trial counter and wallet stale.
+      // Existing account refresh reads the authoritative server values and guards identity.
+      if (shouldRefreshAccount(next.status)) void app.refresh();
       return next;
     } catch (error) {
       if (!current() || !mounted.current) return;
@@ -136,7 +186,7 @@ function ResultScreen({
         error instanceof Error ? error.message : "Could not refresh this job.",
       );
     }
-  }, [jobId]);
+  }, [jobId, app.refresh]);
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -191,7 +241,9 @@ function ResultScreen({
   currentSourceKey.current = sourceKey;
   const sourceStatus =
     sourceState?.key === sourceKey ? sourceState.status : "loading";
-  const canCompare = demo || (!!source && sourceStatus === "loaded");
+  const canCompare = demo
+    ? !localTestPhoto
+    : !!source && sourceStatus === "loaded";
   useEffect(() => {
     setCompare(0.5);
   }, [output?.assetId]);
@@ -209,11 +261,13 @@ function ResultScreen({
   const locked = (output?.accessLevel ?? job?.accessLevel) === "trial_locked";
   // Each output URL is already protected by the server. Do not substitute the
   // top-level anchor preview when the user selects a different locked output.
-  const uri = output?.resultUrl;
+  const uri = demo ? localTestPhoto?.uri : output?.resultUrl;
   const processing = job?.status === "running" || job?.status === "queued";
   useEffect(() => {
     let current = true;
-    setDimensions({ width: 1500, height: 1000 });
+    setDimensions(
+      demo ? { width: 960, height: 640 } : { width: 1500, height: 1000 },
+    );
     if (uri)
       Image.getSize(
         uri,
@@ -227,58 +281,99 @@ function ResultScreen({
       current = false;
     };
   }, [uri]);
-  async function save(share: boolean) {
-    if (busy || !mounted.current) return;
-    if (demo) {
+  async function save(share: boolean, confirmedLocalTest = false) {
+    if (busy || exportSession.current.active || !mounted.current) return;
+    if (demo && !confirmedLocalTest) {
+      if (Platform.OS === "web" || !localTestPhoto) {
+        show(
+          "Native JPEG export test",
+          "In the iOS or Android demo, choose a local export-test photo below. The test uses your disclosure settings without downloading or processing a customer image.",
+        );
+        return;
+      }
       show(
-        share ? "Share your finished image" : "Save to Photos",
-        "The native app saves or shares a full-resolution JPEG, with your optional disclosure. This preview uses sample photos and does not download them.",
+        share ? "Share this local test JPEG?" : "Save this local test JPEG?",
+        "This creates a real JPEG from your selected local photo and disclosure settings. It is not an AI result. No image is uploaded to Furnio and no credits are used. Saving adds a new copy to Photos; sharing opens the system share sheet.",
+        [
+          { title: "Not yet", secondary: true },
+          {
+            title: share ? "Open share sheet" : "Save test JPEG",
+            action: () => void save(share, true),
+          },
+        ],
       );
       return;
     }
-    if (locked || !output) return;
+    if (!demo && !output) return;
     setBusy(true);
-    let input: File | undefined, final: File | undefined;
     try {
-      if (Platform.OS === "web")
-        throw new Error(
-          "Open the native build to save or share full-resolution results.",
-        );
-      // Re-check access immediately before downloading. Never derive a clean URL from a trial preview.
-      const result = await cleanDownloadUrl(output.assetId);
-      if (!mounted.current) return;
-      if (new URL(result.downloadUrl).protocol !== "https:")
-        throw new Error("The download URL is not secure.");
-      input = new File(Paths.cache, `furnio-source-${Crypto.randomUUID()}.jpg`);
-      await File.downloadFileAsync(result.downloadUrl, input);
-      if (!mounted.current) return;
-      if (!renderer.current)
-        throw new Error("The download renderer is not ready.");
-      final = await renderer.current.render(input.uri, disclosure);
-      if (!mounted.current) return;
-      if (share) {
-        if (!(await Sharing.isAvailableAsync()))
-          throw new Error("Sharing is unavailable on this device.");
-        if (!mounted.current) return;
-        await Sharing.shareAsync(final.uri, {
-          mimeType: "image/jpeg",
-          UTI: "public.jpeg",
-          dialogTitle: "Share your Furnio image",
-        });
-      } else {
-        const MediaLibrary = await import("expo-media-library");
-        const permission = await MediaLibrary.requestPermissionsAsync(true, [
-          "photo",
-        ]);
-        if (!mounted.current) return;
-        if (!permission.granted)
+      await exportSession.current.run(async (own) => {
+        if (Platform.OS === "web")
           throw new Error(
-            "Allow saving photos in Settings, or use Share instead.",
+            "Open the native build to save or share full-resolution results.",
           );
-        await MediaLibrary.Asset.create(final.uri);
-        if (mounted.current)
-          show("Saved to Photos", "Your finished JPEG is ready to use.");
-      }
+        let inputUri: string;
+        if (demo) {
+          // Picker input is not an owned export copy and must not be deleted here.
+          inputUri = demoExportUri(demo, localTestPhoto?.uri);
+        } else {
+          // Re-check access immediately before downloading. Never derive a clean URL from a trial preview.
+          const result = locked
+            ? await api(resultDownloadPath(output!.assetId, "trial_locked"), z.object({ previewUrl: z.url() })).then(value => ({ downloadUrl: value.previewUrl }))
+            : await cleanDownloadUrl(output!.assetId);
+          if (!mounted.current) return;
+          if (new URL(result.downloadUrl).protocol !== "https:")
+            throw new Error("The download URL is not secure.");
+          const input = own(exportSession.current.allocate("source"));
+          await File.downloadFileAsync(result.downloadUrl, input);
+          inputUri = input.uri;
+        }
+        if (!mounted.current) return;
+        if (!locked && !renderer.current)
+          throw new Error("The download renderer is not ready.");
+        // Trial preview already contains the permanent server-applied watermark.
+        // Save/share those exact bytes; never request or reconstruct its clean master.
+        const final = locked ? { uri: inputUri } : await renderer.current!.render(
+          inputUri,
+          disclosure,
+          own,
+          exportSession.current.allocate,
+        );
+        if (!mounted.current) return;
+        if (share) {
+          if (!(await Sharing.isAvailableAsync()))
+            throw new Error("Sharing is unavailable on this device.");
+          if (!mounted.current) return;
+          const finishShare = exportSession.current.beginShare();
+          try {
+            await Sharing.shareAsync(final.uri, {
+              mimeType: "image/jpeg",
+              UTI: "public.jpeg",
+              dialogTitle: "Share your Furnio image",
+            });
+          } finally {
+            finishShare();
+          }
+        } else {
+          const MediaLibrary = await import("expo-media-library");
+          const permission = await MediaLibrary.requestPermissionsAsync(true, [
+            "photo",
+          ]);
+          if (!mounted.current) return;
+          if (!permission.granted)
+            throw new Error(
+              "Allow saving photos in Settings, or use Share instead.",
+            );
+          await MediaLibrary.Asset.create(final.uri);
+          if (mounted.current)
+            show(
+              "Saved to Photos",
+              demo
+                ? "Your local test JPEG was saved. This was not an AI-generated result or a paid job."
+                : locked ? "Your watermarked trial preview was saved. The Furnio watermark remains on the photo." : "Your finished JPEG is ready to use.",
+            );
+        }
+      });
     } catch (error) {
       if (mounted.current)
         show(
@@ -286,9 +381,10 @@ function ResultScreen({
           error instanceof Error ? error.message : "Try again shortly.",
         );
     } finally {
-      if (input?.exists) input.delete();
-      if (final?.exists) final.delete();
-      if (mounted.current) setBusy(false);
+      if (mounted.current) {
+        setCleanupPending(exportSession.current.pending > 0);
+        setBusy(false);
+      }
     }
   }
   return (
@@ -311,12 +407,63 @@ function ResultScreen({
           : "READY FOR ITS NEXT CHAPTER"}
       </Kicker>
       <Heading>
-        {processing ? "Making room\n" : "A whole new\n"}
-        {processing ? "for possibility." : "point of view."}
+        {processing ? "Making room\nfor possibility." : "Room, reimagined."}
       </Heading>
       {!!error && <Notice warning>{error}</Notice>}
+      {demo && !processing && Platform.OS !== "web" && (
+        <Card>
+          <Kicker>Local export test · demo only</Kicker>
+          <Body muted>
+            Choose a device photo to test the real disclosure, JPEG saving and
+            sharing. No AI processing or upload occurs. Your original photo
+            remains unchanged.
+          </Body>
+          {localTestPhoto && (
+            <Label>
+              {localTestPhoto.width} × {localTestPhoto.height} px · selected
+              local photo, not an AI result
+            </Label>
+          )}
+          <Button
+            secondary
+            disabled={busy}
+            title="Choose local export-test photo"
+            onPress={() => {
+              void choosePhotos()
+                .then((files) => {
+                  if (mounted.current && files[0]) setLocalTestPhoto(files[0]);
+                })
+                .catch(() => {
+                  if (mounted.current)
+                    show(
+                      "Photo could not be opened",
+                      "Please choose another local photo.",
+                    );
+                });
+            }}
+          />
+        </Card>
+      )}
+      {cleanupPending && (
+        <Card>
+          <Notice warning>
+            Some temporary export copies could not be cleared from this app.
+            Your cloud result and any photo already saved or shared are
+            unchanged.
+          </Notice>
+          <Button
+            title="Retry temporary-file cleanup"
+            secondary
+            disabled={busy}
+            onPress={() =>
+              setCleanupPending(exportSession.current.cleanup() > 0)
+            }
+          />
+        </Card>
+      )}
       {processing ? (
         <Card>
+          <ProcessingAnimation label={job?.status === "queued" ? "Your edit is in the queue." : "Your photo is taking shape."} />
           <Heading small>
             {job?.status === "queued"
               ? "Your edit is in the queue."
@@ -348,14 +495,16 @@ function ResultScreen({
             <Image
               key={uri ?? "demo-after"}
               accessibilityLabel={
-                output
-                  ? `${resultLabel(output)} — Furnio result`
-                  : "Furnio result"
+                demo && localTestPhoto
+                  ? "Local export-test photo, not an AI result"
+                  : output
+                    ? `${resultLabel(output)} — Furnio result`
+                    : "Furnio result"
               }
-              source={demo ? photos.after : { uri: uri! }}
+              source={demo && !localTestPhoto ? photos.after : { uri: uri! }}
               style={{ width: "100%", height: "100%" }}
             />
-            {(demo || source) && (
+            {((demo && !localTestPhoto) || source) && (
               <View
                 style={{
                   width: `${compare * 100}%`,
@@ -482,6 +631,8 @@ function ResultScreen({
       )}
       {locked ? (
         <Card>
+          <Button title="Save watermarked preview" busy={busy} disabled={!output || processing} onPress={() => void save(false)} />
+          <Button title="Share watermarked preview" secondary busy={busy} disabled={!output || processing} onPress={() => void save(true)} />
           <Heading small>Love the preview?</Heading>
           <Body muted>
             Unlock the clean, full-resolution image for{" "}
@@ -535,7 +686,15 @@ function ResultScreen({
         !processing &&
         (demo || output) && (
           <>
-            <DisclosureControls value={disclosure} onChange={setDisclosure} />
+            <Card>
+              <Body style={{ fontFamily: "DMBold" }}>Make it listing-ready</Body>
+              <Body muted style={{ fontSize: 13 }}>Optional “Virtually Staged” label</Body>
+              <Button title="Edit disclosure label" secondary onPress={() => setEditingDisclosure(true)} />
+              <View style={styles.row}><Pill>JPEG</Pill><Pill>Full resolution</Pill></View>
+            </Card>
+            <BottomSheet visible={editingDisclosure} onClose={() => setEditingDisclosure(false)}>
+              <DisclosureControls value={disclosure} onChange={setDisclosure} />
+            </BottomSheet>
             <Button
               title="Save full-resolution JPEG"
               busy={busy}

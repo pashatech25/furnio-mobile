@@ -5,15 +5,8 @@ import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { File } from "expo-file-system";
 import { z } from "zod";
 import { api } from "./state";
-import {
-  MAX_UPLOAD_BYTES,
-  completeUploadResponseSchema,
-  presignUploadSchema,
-  presignUploadResponseSchema,
-  presignMaskResponseSchema,
-  type ReserveBatchResponse,
-} from "./contracts/uploads";
-import type { ServiceId } from "./services";
+import { MAX_UPLOAD_BYTES } from "./contracts/uploads";
+import type { InputTransaction } from "./media/native-inputs";
 
 export type LocalPhoto = {
   uri: string;
@@ -29,9 +22,13 @@ export async function fileBytes(uri: string): Promise<ArrayBuffer> {
     : new File(uri).arrayBuffer();
 }
 export async function choosePhotos(
+  transaction: InputTransaction,
   limit = 1,
   camera = false,
 ): Promise<LocalPhoto[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
+    throw new Error("Choose between 1 and 50 photos.");
+  transaction.assertCurrent();
   if (camera) {
     const permission = await Picker.requestCameraPermissionsAsync();
     if (!permission.granted)
@@ -39,6 +36,7 @@ export async function choosePhotos(
         "Camera permission is needed to take a photo. You can still choose an existing photo.",
       );
   }
+  transaction.assertCurrent();
   const result = camera
     ? await Picker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 })
     : await Picker.launchImageLibraryAsync({
@@ -49,165 +47,162 @@ export async function choosePhotos(
         orderedSelection: true,
       });
   if (result.canceled) return [];
-  const output: LocalPhoto[] = [];
-  for (const asset of result.assets.slice(0, limit)) {
-    // Normalises HEIC/PNG and device orientation into the JPEG contract before masks or placements are drawn.
-    const image = await ImageManipulator.manipulate(asset.uri).renderAsync();
-    const saved = await image.saveAsync({
-      format: SaveFormat.JPEG,
-      compress: 0.95,
-    });
-    const bytes = (await fileBytes(saved.uri)).byteLength;
-    if (bytes > MAX_UPLOAD_BYTES)
-      throw new Error(
-        "This photo exceeds 20 MB. Export a smaller JPEG before uploading.",
+  const clean = rememberSelection(transaction, result.assets, "picker");
+  try {
+    transaction.assertCurrent();
+    const output: LocalPhoto[] = [];
+    for (const asset of result.assets.slice(0, limit)) {
+      output.push(
+        await normalizePhoto(
+          transaction,
+          asset.uri,
+          (asset.fileName ?? "property-photo").replace(/\.[^.]+$/, "") + ".jpg",
+        ),
       );
-    output.push({
-      uri: saved.uri,
-      name:
-        (asset.fileName ?? "property-photo").replace(/\.[^.]+$/, "") + ".jpg",
-      contentType: "image/jpeg",
-      bytes,
-      width: saved.width,
-      height: saved.height,
-    });
+    }
+    return output;
+  } finally {
+    clean(); // Includes excess selections and copies returned after cancellation.
   }
-  return output;
 }
-export async function chooseFloorplan(): Promise<LocalPhoto[]> {
+export async function chooseFloorplan(
+  transaction: InputTransaction,
+): Promise<LocalPhoto[]> {
+  transaction.assertCurrent();
   const result = await Documents.getDocumentAsync({
     type: ["application/pdf", "image/jpeg"],
     multiple: false,
     copyToCacheDirectory: true,
   });
   if (result.canceled) return [];
-  const file = result.assets[0];
-  if (!file) return [];
-  const bytes = file.size ?? (await fileBytes(file.uri)).byteLength;
-  if (bytes > MAX_UPLOAD_BYTES)
-    throw new Error("Floor plans must be 20 MB or smaller.");
-  if (file.mimeType === "image/jpeg") {
-    const image = await ImageManipulator.manipulate(file.uri).renderAsync();
-    const jpeg = await image.saveAsync({
+  const clean = rememberSelection(transaction, result.assets, "document");
+  try {
+    transaction.assertCurrent();
+    const file = result.assets[0];
+    if (!file) return [];
+    if (file.mimeType === "image/jpeg")
+      return [
+        await normalizePhoto(
+          transaction,
+          file.uri,
+          file.name.replace(/\.[^.]+$/, "") + ".jpg",
+        ),
+      ];
+    if (file.mimeType !== "application/pdf")
+      throw new Error("Choose a JPEG or single-page PDF.");
+    const bytes = await checkedFileSize(file.uri);
+    transaction.assertCurrent();
+    // The server still validates PDF content/page count. Only the private copy
+    // is kept while editing; the external Files document is never deleted.
+    return [
+      {
+        uri: await transaction.copy(file.uri, "pdf"),
+        name: file.name,
+        bytes,
+        contentType: "application/pdf",
+        width: 1,
+        height: 1,
+      },
+    ];
+  } finally {
+    clean();
+  }
+}
+
+function rememberSelection(
+  transaction: InputTransaction,
+  assets: { uri: string }[],
+  source: "picker" | "document",
+) {
+  const removals: (() => void)[] = [];
+  let failure: unknown;
+  // Register every returned SDK copy, even if one entry or later conversion is
+  // invalid. Do not abandon earlier/later files on the first exception.
+  for (const asset of assets) {
+    try {
+      removals.push(transaction.rememberSdk(asset.uri, source));
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  const clean = () => {
+    let cleanupFailure: unknown;
+    for (const remove of removals) {
+      try {
+        remove();
+      } catch (error) {
+        cleanupFailure ??= error;
+      }
+    }
+    if (cleanupFailure) throw cleanupFailure;
+  };
+  if (failure) {
+    clean();
+    throw failure;
+  }
+  return clean;
+}
+async function checkedFileSize(uri: string) {
+  // Native metadata avoids allocating an unbounded ArrayBuffer simply to
+  // measure a file; do not trust picker-supplied size for upload validation.
+  const bytes =
+    Platform.OS === "web"
+      ? (await fileBytes(uri)).byteLength
+      : new File(uri).size;
+  if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > MAX_UPLOAD_BYTES)
+    throw new Error("Choose a non-empty image or PDF of 20 MB or smaller.");
+  return bytes;
+}
+async function normalizePhoto(
+  transaction: InputTransaction,
+  uri: string,
+  name: string,
+): Promise<LocalPhoto> {
+  transaction.assertCurrent();
+  await checkedFileSize(uri);
+  transaction.assertCurrent();
+  // Normalises HEIC/PNG and device orientation before masks or placement.
+  const context = ImageManipulator.manipulate(uri);
+  let image: Awaited<ReturnType<typeof context.renderAsync>> | undefined;
+  let remove: (() => void) | undefined;
+  try {
+    image = await context.renderAsync();
+    transaction.assertCurrent();
+    const saved = await image.saveAsync({
       format: SaveFormat.JPEG,
       compress: 0.95,
     });
-    return [
-      {
-        uri: jpeg.uri,
-        name: file.name,
-        bytes: (await fileBytes(jpeg.uri)).byteLength,
-        contentType: "image/jpeg",
-        width: jpeg.width,
-        height: jpeg.height,
-      },
-    ];
-  }
-  if (file.mimeType !== "application/pdf")
-    throw new Error("Choose a JPEG or single-page PDF.");
-  // The existing server validates PDF pages and content. Never guess page count from raw PDF text.
-  return [
-    {
-      uri: file.uri,
-      name: file.name,
+    remove = transaction.rememberSdk(saved.uri, "manipulator");
+    transaction.assertCurrent();
+    const bytes = await checkedFileSize(saved.uri);
+    transaction.assertCurrent();
+    if (
+      ![saved.width, saved.height].every(
+        (value) => Number.isSafeInteger(value) && value > 0,
+      )
+    )
+      throw new Error(
+        "This photo has invalid dimensions. Choose another file.",
+      );
+    return {
+      uri: await transaction.copy(saved.uri, "jpg"),
+      name,
+      contentType: "image/jpeg",
       bytes,
-      contentType: "application/pdf",
-      width: 1,
-      height: 1,
-    },
-  ];
-}
-async function putBytes(
-  url: string,
-  headers: Record<string, string>,
-  bytes: ArrayBuffer,
-) {
-  if (new URL(url).protocol !== "https:")
-    throw new Error("The server returned an insecure upload URL.");
-  // Signed storage requests must NOT include the customer's bearer token.
-  const response = await fetch(url, {
-    method: "PUT",
-    headers,
-    body: bytes,
-    redirect: "error",
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok)
-    throw new Error(
-      "Photo upload was interrupted. Your job has not been submitted.",
-    );
-}
-export async function uploadPhoto(
-  file: LocalPhoto,
-  projectId: string,
-  service: ServiceId,
-  extra: {
-    roomGroupId?: string;
-    viewIndex?: number;
-    isAnchor?: boolean;
-    countsTowardPhotoLimit?: boolean;
-  } = {},
-) {
-  const request = presignUploadSchema.parse({
-    projectId,
-    featureSlug: service,
-    fileName: file.name,
-    contentType: file.contentType,
-    contentLength: file.bytes,
-    ...extra,
-  });
-  const signed = await api(
-    "/api/uploads/presign",
-    presignUploadResponseSchema,
-    request,
-  );
-  await putBytes(signed.uploadUrl, signed.headers, await fileBytes(file.uri));
-  return api(
-    `/api/uploads/${signed.assetId}/complete`,
-    completeUploadResponseSchema,
-    {},
-  );
-}
-export async function uploadMask(
-  base64: string,
-  service: "item_removal" | "custom_staging",
-  batchItemId?: string,
-) {
-  const binary = Uint8Array.from(atob(base64), (character) =>
-    character.charCodeAt(0),
-  );
-  if (binary.byteLength > 5 * 1024 * 1024)
-    throw new Error("The painted mask exceeds the 5 MB server limit.");
-  const signed = await api(
-    "/api/uploads/mask/presign",
-    presignMaskResponseSchema,
-    {
-      contentLength: binary.byteLength,
-      contentType: "image/png",
-      featureSlug: service,
-      ...(batchItemId ? { batchItemId } : {}),
-    },
-  );
-  await putBytes(signed.uploadUrl, signed.headers, binary.buffer);
-  return signed.maskKey;
-}
-export async function uploadReservedPhoto(
-  file: LocalPhoto,
-  signed: ReserveBatchResponse["items"][number],
-) {
-  const bytes = await fileBytes(file.uri);
-  if (bytes.byteLength !== signed.contentLength)
-    throw new Error(
-      "This photo changed after the batch was reserved. It was not uploaded.",
-    );
-  await putBytes(signed.uploadUrl, signed.headers, bytes);
-  const completed = await api(
-    `/api/uploads/${signed.assetId}/complete`,
-    completeUploadResponseSchema,
-    {},
-  );
-  if (completed.assetId !== signed.assetId)
-    throw new Error("The completed upload did not match its reservation.");
+      width: saved.width,
+      height: saved.height,
+    };
+  } finally {
+    try {
+      remove?.();
+    } finally {
+      try {
+        image?.release();
+      } finally {
+        context.release();
+      }
+    }
+  }
 }
 export async function cleanDownloadUrl(assetId: string) {
   z.uuid().parse(assetId);

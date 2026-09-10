@@ -89,7 +89,7 @@ describe("SDK cancellation provider risk checks", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
     for (const [url, options] of fetcher.mock.calls) {
       expect(new URL(String(url)).origin).toBe("https://api.revenuecat.com");
-      expect(options).toMatchObject({ method: "GET", redirect: "error" });
+      expect(options).toMatchObject({ method: "GET", redirect: "manual" });
     }
   });
   it("allows old consumables and an existing plan when cancelling only a new pack", async () => {

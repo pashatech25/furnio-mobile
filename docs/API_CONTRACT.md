@@ -4,6 +4,10 @@ Initially recorded 2026-09-08; updated 2026-09-09 against the Furnio working tre
 
 ## Ownership and source
 
+### Ordinary Studio recovery (additive, disabled)
+
+`POST /api/mobile/v1/submissions/recover` accepts `{ projectId, service, sourceIds, referenceIds, anchorId }` under the existing verified customer session. It returns an exact owned-job match, `not_found` (still uncertain), or `needs_review`. Independent API flag: `MOBILE_SUBMISSION_RECOVERY_ENABLED=false`. The app checks this route before the first job POST; no fallback to legacy processing. See `SUBMISSION_RECOVERY.md` for device receipts, bounded projections, retained uncertainty and staging/support-resolution gates. This does not change frozen service request schemas or processing Workers.
+
 The existing customer API remains authoritative for identity permissions, service availability, Admin prompts, uploaded assets, jobs and credit reservations. The native app does not call FAL, hold provider keys, send a master prompt or access Postgres directly.
 
 `src/contracts/{auth,jobs,uploads}.ts` are byte-preserving imports from `packages/shared/src` in `furnio-main`. `src/contracts/manifest.json` records their checksums. `pnpm check:contracts` checks this snapshot, **not parity with deployed production**. The uploads snapshot includes pre-existing uncommitted reference-furniture work; review its deployment status before staging integration. Do not hand-edit the imported contracts.
@@ -70,6 +74,8 @@ Reserved but **not implemented**, deliberately unavailable:
 - `POST /v1/account/delete`
 
 Implemented locally, disabled/unconfigured: `GET /v1/account/deletion/review` accepts no parameters and returns a read-only, recently authenticated shared-account inventory. It verifies the bearer token with Supabase Auth plus the exact live session/AMR/assurance in the database. It remains independent of paid/platform/phone/suspension restrictions, and it cannot request or execute deletion. `canRequestDeletion` and `accountDeletionReady` remain false. Disabled request APIs add POST `/v1/account/deletion/prepare`, `/cancel` and capability-only `/status`. POST `/confirm` is code-blocked until the cleanup processor exists; it accepts no destructive request in this build. Input is strict, bounded JSON. Status recovery is independent of app-entry flags and login. See `ACCOUNT_DELETION.md` for the contract, source inventory and remaining destructive-workflow gates.
+
+Privacy review/request readiness now also requires independent rate-limit bindings and the server-only `ACCOUNT_DELETION_LIMIT_SECRET`. Source/account/complete-receipt counters run before database work; denial returns 429 with `Retry-After: 60` and no-store. Misconfiguration/failure returns a redacted 503. Status retains this protection after sign-out/entry rollback; neither error permits automatic deletion retries. See `ACCOUNT_PRIVACY_RATE_LIMITS.md` for exact limits, direct-ingress requirements and real-edge acceptance still pending.
 
 Implemented locally, disabled/unconfigured: `POST /v1/purchases/reconcile` accepts only `{}` and starts/reuses account-scoped durable RevenueCat history recovery; `GET /v1/purchases/reconcile` reads that customer's status. Possible statuses: `pending`, `needs_review`, `no_purchases_found`, `not_started`, `synchronized`, with nullable `checkedAt`. Internal queue/run/lease/cursor identifiers never reach the client. See `NATIVE_RECOVERY.md` for fail-closed history handling and pending acceptance gates.
 

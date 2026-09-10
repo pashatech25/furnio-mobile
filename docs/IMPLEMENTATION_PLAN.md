@@ -1,5 +1,13 @@
 # Furnio Customer App — iOS and Android Implementation Plan
 
+## Current approved scope — revised 9 September 2026
+
+**Website-only purchases.** The owner replaced in-app purchasing with a free companion app using the same Furnio account, projects and existing website credits. Follow [WEB_PURCHASES_DECISION.md](WEB_PURCHASES_DECISION.md) for the new build sequence, store restrictions, remaining release gates and production-protection boundaries. RevenueCat, native product setup, native payment/ledger rollout and native billing compatibility are deferred—not release requirements.
+
+Current definition of done: customers can sign in, use all enabled services with their existing shared credits, and see the same projects/balance as the website, with passing website regressions, complete privacy/deletion workflows and store acceptance of the companion model. Purchases remain on Furnio.ai; do not promise a checkout link in every storefront.
+
+## Original plan — preserved history, native-commerce sections superseded
+
 Approved by the owner on 2026-09-08. This document records the agreed scope. Completion is tracked separately in PROGRESS.md; this is not a claim of delivery.
 
 ## 1. What we’re building

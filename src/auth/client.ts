@@ -45,7 +45,13 @@ export async function googleSignIn() {
   const redirectTo = callbackUrl();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo, skipBrowserRedirect: true },
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+      // Furnio sign-out does not sign the customer out of Google's browser
+      // session. Always let them choose which Google account to use next.
+      queryParams: { prompt: "select_account" },
+    },
   });
   if (error) throw error;
   const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);

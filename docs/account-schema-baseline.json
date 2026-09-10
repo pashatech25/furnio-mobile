@@ -59,7 +59,12 @@
         "20260909113159_native_refund_reversal_reason.sql": "b769136b19cdd91a0bf602862e00b87c8b93d325624acac2074d28c203a49c1a",
         "20260909113200_native_refund_reversal_recovery.sql": "d1d9e7a2ca53cc1a774253dcd6ff39836d070f9ff0fb13a47a40dcd80ef4bf7f",
         "20260909121424_native_sdk_cancellation_recovery.sql": "b02b33aab6cfe65b532c353c7c8f414e0e31913bebd4f49f575cf259ca317f24",
-        "20260909130505_native_admin_reporting.sql": "7c63e0091b47cef47ed38910c9e668f0a6b303f508e1a1d5bfeb3307dc9aff53"
+        "20260909130505_native_admin_reporting.sql": "7c63e0091b47cef47ed38910c9e668f0a6b303f508e1a1d5bfeb3307dc9aff53",
+        "20260909150518_mobile_account_email_fence.sql": "ff9e0dab2682e72d1e7bb25634133bd749a8f1500a5b47a18b25aa996c685f9c",
+        "20260909185306_native_subscription_overlap_reporting.sql": "021d9edc10ede3909b65dbd2885f5521c70a6ce79a6773437fa094c0d64052cd",
+        "20260909193514_mobile_account_automation_fence.sql": "456173c0a75fb661fb41d36d046c66748f01b40a027b754a8eb82dbce462ecf4",
+        "20260909213457_native_automation_customer_billing.sql": "4d97a845adcadf1fc5de974f06e3a7d5929da850b3e8d804d1615351669dd606",
+        "20260909215817_native_unstarted_trial_conversion.sql": "7c2349eb8fd878639f3c2ae4702ac8a381d8d9587bf01d99fd1511a10076e0eb"
       }
     },
     {

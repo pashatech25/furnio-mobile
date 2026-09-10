@@ -30,9 +30,10 @@ await build({ stdin: { contents: `import React from 'react'; import {createRoot}
         if (path.startsWith('/api/admin/native-reporting?offset=')) {
           if(window.fixtureFail) throw new Error('Synthetic outage');
           const report=nativeReportingFixture(); const offset=Number(new URL(path,'https://offline.invalid').searchParams.get('offset'));
-          report.followUp.totalAccounts=51;report.followUp.totalSignals=51;report.followUp.offset=offset;
+          report.followUp.totalAccounts=51;report.followUp.totalSignals=52;report.followUp.offset=offset;
           const sample=report.followUp.customers[0];
-          report.followUp.customers=Array.from({length:51},(_,i)=>({...sample,userId:'00000000-0000-4000-8000-'+String(401+i).padStart(12,'0')})).slice(offset,offset+50);
+          report.followUp.customers=Array.from({length:51},(_,i)=>({...sample,userId:'00000000-0000-4000-8000-'+String(401+i).padStart(12,'0'),
+            ...(i===0?{signals:2,subscriptionOverlaps:1,overlapSubscriptions:{appStore:1,playStore:1,stripe:0,stripeUnknownMode:1}}:{})})).slice(offset,offset+50);
           return {report};
         }
         if (/^\/api\/admin\/customers\/[a-f0-9-]+\/native-billing$/.test(path)) return {nativeBilling:{billing:{creditsRemaining:5,subscriptionCount:0,subscriptions:[]},payments:[],alerts:[]}};

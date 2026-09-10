@@ -71,7 +71,8 @@ create table public.billing_package_versions(
  id uuid primary key, package_id uuid references public.billing_packages(id),
  purchase_audience text not null default 'customer', name text not null, package_key text not null default 'fixture_package',
  interval text not null, total_credits integer not null, max_source_photos_per_project integer not null,
- rollover_limit integer not null default 0, stripe_price_id text not null default 'price_test'
+ rollover_limit integer not null default 0, stripe_price_id text not null default 'price_test',
+ stripe_livemode boolean not null default false
 );
 create table public.subscriptions(
  id text primary key, user_id uuid not null references public.profiles(id),
@@ -82,7 +83,7 @@ create table public.subscriptions(
  cancel_at_period_end boolean not null default false,
  subscription_credit_balance integer not null default 0 check(subscription_credit_balance >= 0),
  rollover_year_started_at timestamptz, rollover_crossings_used integer not null default 0,
- updated_at timestamptz not null default now()
+ updated_at timestamptz not null default now(), created_at timestamptz not null default now()
 );
 alter table public.subscriptions add column billing_context text not null default 'customer';
 alter table public.subscriptions add column pause_collection jsonb;

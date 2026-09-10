@@ -25,7 +25,7 @@ export const services: Service[] = [
     id: "virtual_staging",
     name: "Virtual staging",
     description: "Furniture, without the furniture truck.",
-    image: photos.stage,
+    image: require("../assets/virtual-staging-owner.jpg"),
     endpoint: "/api/jobs/stage",
     min: 1,
     max: 1,

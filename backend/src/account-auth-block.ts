@@ -50,7 +50,7 @@ export async function blockAccountSignIn(
     const read = async (method: "GET" | "PUT") => {
       const response = await fetcher(url, {
         method,
-        redirect: "error",
+        redirect: "manual",
         cache: "no-store",
         signal: AbortSignal.timeout(10_000),
         headers: {

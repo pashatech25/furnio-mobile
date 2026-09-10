@@ -12,3 +12,5 @@ minimumReleaseAgeExclude:
   - expo-glass-effect@57.0.2
   - expo-router@57.0.20
   - lucide-react-native@1.43.0
+patchedDependencies:
+  react-native-svg@15.15.4: patches/react-native-svg@15.15.4.patch

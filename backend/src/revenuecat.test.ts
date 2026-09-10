@@ -455,7 +455,10 @@ describe("independent RevenueCat API verification", () => {
     expect(String(mock.mock.calls[0]?.[0])).toBe(
       "https://api.revenuecat.com/v2/projects/proj1/purchases?store_purchase_identifier=store_1",
     );
-    expect(mock.mock.calls[0]?.[1]?.redirect).toBe("error");
+    expect(mock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    expect(
+      mock.mock.contexts.every((receiver) => receiver === globalThis),
+    ).toBe(true);
   });
   it("prepares refunded purchases for atomic grant-and-recovery, not spendable credit", async () => {
     const { client } = verifier([

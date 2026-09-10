@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Keyboard, Pressable } from "react-native";
 import { router } from "expo-router";
 import {
   getCountryCallingCode,
@@ -11,6 +11,8 @@ import { z } from "zod";
 import { api, useApp } from "../src/state";
 import { supabase } from "../src/auth/client";
 import { Challenge } from "../src/auth/Challenge";
+import { countryName } from "../src/auth/country-names";
+import { pendingPhone } from "../src/auth/pending-phone";
 import { demo } from "../src/config";
 import { trialSchema } from "../src/api/schemas";
 import {
@@ -22,7 +24,6 @@ import {
   Kicker,
   Notice,
   Page,
-  styles,
   useDialog,
 } from "../src/ui";
 
@@ -42,18 +43,32 @@ export default function Verify() {
   const [resendAt, setResendAt] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const allowed = app.trial?.allowedCountryCodes ?? [];
-  const names = useMemo(
-    () => new Intl.DisplayNames(["en"], { type: "region" }),
-    [],
-  );
+  const securityConfigured = demo || !!app.trial?.turnstileSiteKey;
   const countries = allowed
     .filter((item): item is CountryCode => isSupportedCountry(item))
     .map((item) => ({
       code: item,
-      label: names.of(item) ?? item,
+      label: countryName(item),
       dial: "+" + getCountryCallingCode(item),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
+  useEffect(() => {
+    if (!supabase || !app.user?.id) return;
+    let current = true;
+    const owner = app.user.id;
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (!current || selected.current || error || data.user?.id !== owner) return;
+      const pending = pendingPhone(data.user.new_phone, allowed);
+      if (!pending) return;
+      selected.current = true;
+      setCountry(pending.country);
+      setPhone(pending.number);
+      setSentPhone(pending.number);
+      // Conservative local countdown; authoritative resend limits remain server-side.
+      setResendAt(Date.now() + (app.trial?.minimumResendSeconds ?? 60) * 1000);
+    }).catch(() => { /* Leave the normal phone form available on read failure. */ });
+    return () => { current = false; };
+  }, [app.user?.id, allowed.join(",")]);
   useEffect(() => {
     if (demo) return;
     void api(
@@ -84,6 +99,7 @@ export default function Verify() {
   }, [resendAt]);
   async function send() {
     if (busy || seconds) return;
+    selected.current = true;
     setBusy(true);
     try {
       const parsed = parsePhoneNumberFromString(phone, country);
@@ -110,6 +126,9 @@ export default function Verify() {
         }
       }
       setSentPhone(parsed.number);
+      setCode("");
+      setChoosing(false);
+      Keyboard.dismiss();
       setResendAt(Date.now() + (app.trial?.minimumResendSeconds ?? 60) * 1000);
     } catch (error) {
       show(
@@ -155,17 +174,48 @@ export default function Verify() {
     }
   }
   return (
-    <Page>
-      <Kicker>ONE SMALL STEP</Kicker>
-      <Heading>Let’s make it yours.</Heading>
+    <Page key={sentPhone ? "code-entry" : "phone-entry"}>
+      <Kicker>{sentPhone ? "CHECK YOUR TEXT MESSAGES" : "ONE SMALL STEP"}</Kicker>
+      <Heading>{sentPhone ? "Enter your code." : "Let’s make it yours."}</Heading>
       <Body muted>
-        Verify your mobile number to protect your Furnio account. Your existing
-        verification rules still apply.
+        {sentPhone ? `We sent a six-digit verification code to ${sentPhone}.` :
+          "Verify your mobile number to protect your Furnio account. Your existing verification rules still apply."}
       </Body>
+      {sentPhone ? (
+        <Card>
+          <Field
+            label="Six-digit code"
+            value={code}
+            onChangeText={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}
+            autoComplete="sms-otp"
+            textContentType="oneTimeCode"
+            keyboardType="number-pad"
+            maxLength={6}
+            placeholder="000000"
+            editable={!busy}
+          />
+          <Button
+            title="Verify & continue"
+            disabled={code.length !== 6}
+            busy={busy}
+            onPress={() => void verify()}
+          />
+          <Button
+            title="Change phone number"
+            secondary
+            disabled={busy}
+            onPress={() => {
+              selected.current = true;
+              setSentPhone(""); setCode(""); setToken("");
+              setRevision((value) => value + 1);
+            }}
+          />
+        </Card>
+      ) : (
       <Card>
         <Body style={{ fontFamily: "DMBold" }}>Your mobile number</Body>
         <Button
-          title={`${names.of(country)}  +${getCountryCallingCode(country)}`}
+          title={`${countryName(country)}  +${getCountryCallingCode(country)}`}
           secondary
           onPress={() => setChoosing(!choosing)}
         />
@@ -203,13 +253,18 @@ export default function Verify() {
         <Field
           label="Phone number"
           value={phone}
-          onChangeText={setPhone}
+          onChangeText={(value) => { selected.current = true; setPhone(value); }}
           keyboardType="phone-pad"
           autoComplete="tel"
           placeholder="Your mobile number"
           editable={!busy}
         />
-        <Challenge onToken={setToken} revision={revision} />
+        {securityConfigured ? <Challenge onToken={setToken} revision={revision} /> : (
+          <Notice warning>
+            Furnio’s phone-verification security setup is not complete yet.
+            No code has been sent. You do not need to retry or change your connection.
+          </Notice>
+        )}
         <Button
           title={
             seconds
@@ -218,29 +273,22 @@ export default function Verify() {
                 ? "Resend code"
                 : "Send verification code"
           }
-          disabled={!token || seconds > 0}
+          disabled={!securityConfigured || !token || seconds > 0}
           busy={busy}
           onPress={() => void send()}
         />
       </Card>
-      {!!sentPhone && (
+      )}
+      {sentPhone && (
         <Card>
-          <Body>We sent a code to {sentPhone}.</Body>
-          <Field
-            label="Six-digit code"
-            value={code}
-            onChangeText={(value) =>
-              setCode(value.replace(/\D/g, "").slice(0, 6))
-            }
-            autoComplete="sms-otp"
-            textContentType="oneTimeCode"
-            keyboardType="number-pad"
-            maxLength={6}
-          />
+          <Body muted>Didn’t receive it? You can request another text below.</Body>
+          {seconds === 0 && <Challenge onToken={setToken} revision={revision} />}
           <Button
-            title="Verify & continue"
+            title={seconds ? `Resend in ${seconds}s` : "Resend code"}
+            secondary
+            disabled={!token || seconds > 0}
             busy={busy}
-            onPress={() => void verify()}
+            onPress={() => void send()}
           />
         </Card>
       )}

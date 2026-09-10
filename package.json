@@ -7,6 +7,13 @@
   "engines": {
     "node": ">=22.13.0"
   },
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-purchases"
+      ]
+    }
+  },
   "scripts": {
     "start": "expo start",
     "ios": "expo run:ios",
@@ -16,6 +23,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:ledger": "node scripts/test-ledger.mjs",
+    "test:schema": "node scripts/test-schema.mjs",
     "check:contracts": "node scripts/sync-contracts.mjs --check",
     "check:account-inventory": "node scripts/check-account-inventory.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm check:contracts",
@@ -25,6 +33,7 @@
     "worker:build": "wrangler deploy --config backend/wrangler.jsonc --dry-run --outdir backend/dist"
   },
   "dependencies": {
+    "@expo-google-fonts/caveat": "0.4.2",
     "@expo-google-fonts/dm-sans": "0.4.2",
     "@expo-google-fonts/instrument-serif": "0.4.1",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -32,6 +41,7 @@
     "@supabase/supabase-js": "2.116.0",
     "expo": "57.0.21",
     "expo-apple-authentication": "~57.0.1",
+    "expo-audio": "~57.0.4",
     "expo-constants": "~57.0.17",
     "expo-crypto": "~57.0.2",
     "expo-dev-client": "~57.0.18",
@@ -49,13 +59,13 @@
     "expo-sharing": "~57.0.18",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.3",
+    "expo-video": "~57.0.3",
     "expo-web-browser": "~57.0.2",
     "libphonenumber-js": "1.13.12",
     "lucide-react-native": "1.43.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-purchases": "10.9.0",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.2",
@@ -72,6 +82,7 @@
     "@types/node": "26.4.0",
     "@types/react": "19.2.4",
     "prettier": "3.6.2",
+    "react-native-purchases": "10.9.0",
     "typescript": "6.0.3",
     "vitest": "4.1.11",
     "wrangler": "4.129.1"

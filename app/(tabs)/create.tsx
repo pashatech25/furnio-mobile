@@ -1,3 +1,6 @@
+import { ServicePhoto } from "../../src/ServicePhoto";
+import { TrialAllowance } from "../../src/TrialAllowance";
+import { hasServiceCredits, isServiceLocked } from "../../src/api/funding";
 import { Image, Pressable, View } from "react-native";
 import { router } from "expo-router";
 import { ChevronRight } from "lucide-react-native";
@@ -21,9 +24,11 @@ export default function Create() {
       <Kicker>MAKE SOMETHING REMARKABLE</Kicker>
       <Heading>What’s your{"\n"}next transformation?</Heading>
       <Body muted>Nine considered ways to bring a property to life.</Body>
+      <TrialAllowance />
       <Button
         title="Edit a batch of photos"
         secondary
+        disabled={!runtime?.features.some(feature => hasServiceCredits(billing?.balance ?? null, feature.credits_per_output))}
         onPress={() => router.push("/batch")}
       />
       {trial?.state === "active" && (
@@ -47,9 +52,12 @@ export default function Create() {
           const feature = runtime?.features.find(
             (item) => item.slug === service.id,
           );
+          const locked = isServiceLocked(trial, service.id, billing?.balance ?? null, feature?.credits_per_output);
           return (
             <Pressable
               accessibilityRole="button"
+              accessibilityState={{ disabled: locked }}
+              disabled={locked}
               key={service.id}
               onPress={() => router.push(`/studio/${service.id}`)}
               style={{
@@ -60,24 +68,7 @@ export default function Create() {
                 backgroundColor: colors.paper,
               }}
             >
-              <Image
-                source={service.image}
-                style={{ width: "100%", height: 155 }}
-              />
-              <View style={[styles.between, { padding: 18 }]}>
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Heading small style={{ fontSize: 28 }}>
-                    {service.name}
-                  </Heading>
-                  <Body muted style={{ fontSize: 13 }}>
-                    {service.description}
-                  </Body>
-                  <Body style={{ fontSize: 12, fontFamily: "DMBold" }}>
-                    {feature?.credits_per_output} credits per output
-                  </Body>
-                </View>
-                <ChevronRight color={colors.ink} />
-              </View>
+<ServicePhoto service={service} credits={feature?.credits_per_output} locked={locked} />
             </Pressable>
           );
         })}
