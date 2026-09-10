@@ -2,9 +2,15 @@
 
 ## Current checkpoint — 10 September 2026
 
+### Apple screenshot order and availability verified
+
+Both approved screenshot sets are now ordered numerically `01` through `06`, verified from Apple's screenshot controls after keyboard reordering (no replacement artwork). Saved free download pricing (`$0.00`) and launch availability for Canada and United States only; both countries show “Available on App Release.” Disabled Apple Silicon Mac and Vision Pro availability to retain the approved phone/tablet release scope. These are listing settings, not a release or review submission.
+
+Owner confirmation requested for third-party content rights (photos, fonts and pencil sound), and the private Apple reviewer contact name/email/phone plus permission to enter them. Those declarations/contact fields remain unfinished pending the answers. Permanent account deletion, review access and final release builds remain separate release gates.
+
 ### Apple listing upload checkpoint
 
-Owner completed Apple sign-in. Verified Furnio app 6810452958, version 1.0, Prepare for Submission. Uploaded all six approved iPhone screenshots in the 6.9-inch slot (Apple reuses them for 6.5-inch), and all six approved iPad screenshots in the 13-inch slot. Saved description, keywords, support URL (`https://furnio.ai/contact`, HTTP 200 verified) and marketing URL. Apple accepted the iPad size-reuse notice. Manual release remains selected. Screenshot ordering still needs correction/verification: concurrent uploads produced completion order, not the approved numeric sequence. No build or review submission is claimed; reviewer access/contact, copyright, privacy/content declarations and release gates remain.
+Owner completed Apple sign-in. Verified Furnio app 6810452958, version 1.0, Prepare for Submission. Uploaded all six approved iPhone screenshots in the 6.9-inch slot (Apple reuses them for 6.5-inch), and all six approved iPad screenshots in the 13-inch slot. Saved description, keywords, support URL (`https://furnio.ai/contact`, HTTP 200 verified) and marketing URL. Apple accepted the iPad size-reuse notice. Manual release remains selected. Screenshot ordering is now corrected and verified as described above. No build or review submission is claimed; reviewer access/contact, copyright, privacy/content declarations and release gates remain.
 
 ### Upload signing checkpoint — 10 September
 
