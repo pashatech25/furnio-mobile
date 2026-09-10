@@ -1,5 +1,15 @@
 # Furnio store submission status
 
+## Current checkpoint — 10 September 2026
+
+This checkpoint supersedes stale environment/device statements below. Owner explicitly authorized production testing; latest iPhone install uses production, with native purchases/push/permanent cleanup still disabled. Physical device signing and installs now work. Local acceptance fixes and 1,112 tests are committed and pushed to `https://github.com/pashatech25/furnio-mobile.git`, branch `main` (implementation commit `16ac021`). Generated builds, local env files, signing files and IDE state excluded. GitHub initially flagged a hardcoded Twilio account SID; it was removed from the unpublished commit and the staging script now requires local configuration. No push-protection bypass used.
+
+Reopened and read both live store dashboards. Apple is signed in and still **1.0 Prepare for Submission**; content rights and age ratings are not completed. Google still shows **0 opted-in testers**, **12 testers / 14 continuous days**, and disabled production application. Asked owner for the tester group/emails. No binary/review submission was performed during this checkpoint.
+
+Prepared `store/listing.en-US.json`: descriptions, subtitle, keywords, territory intent, and private-review checklist. Field lengths validated. `store/ASSET_BRIEF.md` defines the branded screenshot sequence and official output requirements. These are drafts, not uploaded listings or completed artwork. Capture actual native screens using fictional identifying data before compositing/uploading; do not substitute prototype UI.
+
+Next execution order: complete real native screenshot assets and review access; finish production account deletion with approved retention; audit privacy and purchase-link policy; distribution-signed builds; private acceptance/TestFlight/Play test tracks; final review submission. Optional push is not a prerequisite if omitted accurately from this release. Do not bypass Google's test period or label unfinished cleanup as ready.
+
 ## Current scope
 
 Website-only purchases; no RevenueCat or Apple/Google purchase products for this release. See `WEB_PURCHASES_DECISION.md`. A draft listing is not a submitted or published app.

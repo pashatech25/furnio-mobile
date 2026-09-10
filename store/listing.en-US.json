@@ -1,0 +1,22 @@
+{
+  "status": "draft_for_owner_review",
+  "name": "Furnio",
+  "appleSubtitle": "AI real estate photo editor",
+  "googleShortDescription": "Stage, enhance and edit property photos with AI, wherever work takes you.",
+  "description": "Give your property photos a fresh perspective with Furnio.\n\nCreate and manage property projects, choose photos from your device, and use AI-powered tools built for real estate imagery.\n\nEDIT FOR THE LISTING\n• Virtual staging: furnish empty rooms with selectable room types and furniture styles.\n• Matched multi-view staging: work with multiple views of a space.\n• Item removal: paint the area you want removed, with pinch-to-zoom and a precision brush preview.\n• Custom staging: mark areas and describe the changes you want.\n• Twilight: choose from three twilight moods.\n• Winter to summer: transform a winter exterior into a summer presentation.\n• Exterior enhancement: select supported improvements for your property photo.\n• Floor plans: create floor-plan outputs from supported inputs.\n• Reference furniture: use reference images to guide furniture placement.\n\nFROM PROJECT TO FINISHED PHOTO\nFollow job status, compare available originals with results, and save or share finished images. Add an optional disclosure label to supported clean-image exports. Trial previews retain their permanent Furnio watermark.\n\nONE FURNIO ACCOUNT\nAccess your existing Furnio projects, images and shared credit balance. Service availability, trial eligibility and credit requirements are determined by your account. This app does not offer in-app purchases.\n\nAI-generated images may contain inaccuracies. Review every result before use and follow applicable listing and disclosure requirements. Only upload images you have the right to use.",
+  "appleKeywords": "real estate,virtual staging,property,photo editor,interior,twilight,floor plan,home",
+  "releaseNotes": "Initial release of Furnio for mobile.",
+  "marketingUrl": "https://furnio.ai/",
+  "privacyUrl": "https://furnio.ai/privacy",
+  "territories": ["CA", "US"],
+  "price": "free",
+  "reviewNotesDraft": "Furnio is a companion to an existing real estate photo-editing service. Customers sign in to their shared Furnio account. Native purchases are not offered. Account-specific service and trial eligibility are enforced by the same backend used by the website. Supply a verified, appropriately funded review account through the store's private review-access fields; never commit its credentials. Reviewers must be able to access all submitted functionality without waiting for an SMS from the developer.",
+  "unresolvedBeforeSubmission": [
+    "Verify production account deletion and public deletion-request URL.",
+    "Confirm reviewer account access and service funding privately.",
+    "Complete and review accurate privacy, age and content-rights declarations.",
+    "Capture and approve current native screenshots without real customer identifiers.",
+    "Upload distribution-signed builds and complete owner acceptance.",
+    "Satisfy the Google Play account's closed-testing requirement."
+  ]
+}
