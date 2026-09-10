@@ -1,0 +1,103 @@
+diff --git a/app/_layout.tsx b/app/_layout.tsx
+index bf82b37..2beb703 100644
+--- a/app/_layout.tsx
++++ b/app/_layout.tsx
+@@ -1,4 +1,6 @@
+ import { router, Stack, useSegments } from "expo-router";
++import { useEffect } from "react";
++import { demo } from "../src/config";
+ import { useFonts } from "expo-font";
+ import { StatusBar } from "expo-status-bar";
+ import { ActivityIndicator, View } from "react-native";
+@@ -17,6 +19,12 @@ import {
+   useDialog,
+ } from "../src/ui";
+ function Navigation() {
++  useEffect(() => {
++    if (!demo) return;
++    const routes = ["/", "/create", "/studio/virtual_staging", "/studio/twilight", "/result/22222222-2222-4222-8222-222222222222", "/projects"] as const;
++    const timers = routes.map((route, index) => setTimeout(() => router.replace(route), 2000 + index * 15000));
++    return () => timers.forEach(clearTimeout);
++  }, []);
+   const {
+     user,
+     trial,
+diff --git a/app/result/[jobId].tsx b/app/result/[jobId].tsx
+index 3369f2d..19ada18 100644
+--- a/app/result/[jobId].tsx
++++ b/app/result/[jobId].tsx
+@@ -410,7 +410,7 @@ function ResultScreen({
+         {processing ? "Making room\nfor possibility." : "Room, reimagined."}
+       </Heading>
+       {!!error && <Notice warning>{error}</Notice>}
+-      {demo && !processing && Platform.OS !== "web" && (
++      {false && demo && !processing && Platform.OS !== "web" && (
+         <Card>
+           <Kicker>Local export test · demo only</Kicker>
+           <Body muted>
+diff --git a/app/studio/[service].tsx b/app/studio/[service].tsx
+index 828c94b..b5efbdc 100644
+--- a/app/studio/[service].tsx
++++ b/app/studio/[service].tsx
+@@ -617,9 +617,7 @@ export default function Studio() {
+       footer={
+       <Button
+         title={
+-          demo
+-            ? "Preview the processing experience"
+-            : trialAvailable
++          trialAvailable
+               ? "Create trial preview"
+               : `Create · ${cost} credits`
+         }
+diff --git a/src/state.tsx b/src/state.tsx
+index b3d972e..2372afb 100644
+--- a/src/state.tsx
++++ b/src/state.tsx
+@@ -58,7 +58,7 @@ type State = {
+ };
+ const Context = createContext<State | null>(null);
+ export function AppProvider({ children }: { children: React.ReactNode }) {
+-  const [user, setUser] = useState<User | null>(null);
++  const [user, setUser] = useState<User | null>(demo ? { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Alex", email: "alex@example.com" } : null);
+   const [loading, setLoading] = useState(!demo);
+   const [error, setError] = useState<string | null>(null);
+   const [devicePrivacyError, setDevicePrivacyError] = useState<string | null>(
+diff --git a/src/ui.tsx b/src/ui.tsx
+index 5263d0d..30dd6e6 100644
+--- a/src/ui.tsx
++++ b/src/ui.tsx
+@@ -17,7 +17,7 @@ import {
+ import { SafeAreaView } from "react-native-safe-area-context";
+ import { SvgXml } from "react-native-svg";
+ import { ArrowLeft, ArrowRight, X } from "lucide-react-native";
+-import { router } from "expo-router";
++import { router, usePathname } from "expo-router";
+ import { wordmark } from "./brand";
+ import { config, demo } from "./config";
+ export const colors = {
+@@ -287,6 +287,7 @@ export function Page({
+   hideHeader?: boolean;
+   footer?: React.ReactNode;
+ }) {
++  const capturePath = usePathname();
+   return (
+     <SafeAreaView
+       edges={["top", "left", "right"]}
+@@ -296,7 +297,7 @@ export function Page({
+         behavior={Platform.OS === "ios" ? "padding" : undefined}
+         style={{ flex: 1 }}
+       >
+-        {(demo || config.mode === "staging") && (
++        {config.mode === "staging" && (
+           <View
+             style={{
+               backgroundColor: colors.soft,
+@@ -340,6 +341,7 @@ export function Page({
+             {right && <View style={{ flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}>{right}</View>}
+           </View>}
+         <ScrollView
++          contentOffset={demo && capturePath.startsWith("/studio/") ? { x: 0, y: 860 } : undefined}
+           scrollEnabled={scrollEnabled}
+           keyboardShouldPersistTaps="handled"
+           contentContainerStyle={{ flexGrow: 1, padding: 23, paddingBottom: 36, width: "100%", maxWidth: 760, alignSelf: "center", gap: 22 }}

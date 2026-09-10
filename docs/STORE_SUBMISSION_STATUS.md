@@ -2,6 +2,15 @@
 
 ## Current checkpoint — 10 September 2026
 
+### Store upload checkpoint — 08:55 EDT
+
+- Google Play default English listing: description, approved 512px icon, 1024×500 feature graphic and all six Android screenshots uploaded and saved. Console confirmed “Your changes have been saved.” Review screen now requests the new AI-asset declaration; owner confirmation requested before making that declaration. Screenshot order still needs final verification (bulk upload used completion order).
+- Apple session expired; requested owner sign-in. No Apple screenshot/binary upload is claimed.
+- Re-ran verification: mobile TypeScript, all 1,114 tests across 72 files, Worker TypeScript and frozen API contracts passed. One catalogue parity test initially failed solely on a blank line; it now ignores empty formatting lines while preserving verbatim comparisons of all nonempty catalogue content.
+- Public submission remains gated by unfinished permanent account deletion, private reviewer access, accurate store declarations and distribution builds. Google still requires its closed-test period. Android generated release configuration currently uses the debug signing key and must not be uploaded as a store release.
+
+Artwork update: owner approved the complete gallery—six iPhone, six Android and six iPad compositions, store icons, and the previously approved feature graphic. Full-resolution files are saved in `store/exports/`; provenance is recorded in `store/ARTWORK_STATUS.md`. Screenshot approval is complete. Uploads and release gates below remain separate and are not marked complete by this approval.
+
 This checkpoint supersedes stale environment/device statements below. Owner explicitly authorized production testing; latest iPhone install uses production, with native purchases/push/permanent cleanup still disabled. Physical device signing and installs now work. Local acceptance fixes and 1,112 tests are committed and pushed to `https://github.com/pashatech25/furnio-mobile.git`, branch `main` (implementation commit `16ac021`). Generated builds, local env files, signing files and IDE state excluded. GitHub initially flagged a hardcoded Twilio account SID; it was removed from the unpublished commit and the staging script now requires local configuration. No push-protection bypass used.
 
 Reopened and read both live store dashboards. Apple is signed in and still **1.0 Prepare for Submission**; content rights and age ratings are not completed. Google still shows **0 opted-in testers**, **12 testers / 14 continuous days**, and disabled production application. Asked owner for the tester group/emails. No binary/review submission was performed during this checkpoint.

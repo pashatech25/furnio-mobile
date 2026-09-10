@@ -11,7 +11,8 @@ describe("web creative-control parity", () => {
     expect(studio).toContain('disabled={busy} showAll');
   });
   it.skipIf(!existsSync(web))("keeps every value, label and visual identical to the web catalogue", () => {
-    const options = (source: string) => source.slice(source.indexOf("const image ="));
+    // Ignore empty formatting lines, while still comparing every catalogue value verbatim.
+    const options = (source: string) => source.slice(source.indexOf("const image =")).split("\n").filter(line => line.trim().length > 0).join("\n");
     expect(options(readFileSync(resolve(process.cwd(), "src/creative-options.ts"), "utf8")).trim()).toBe(options(readFileSync(web, "utf8")).trim());
   });
   it("includes all rooms, styles and moods with the web's empty preference value", () => {
