@@ -2,6 +2,12 @@
 
 ## Current checkpoint — 10 September 2026
 
+### First iOS upload succeeded — 14:33 EDT
+
+Xcode App Store distribution export succeeded, producing `output/store/ios-distribution-1/Furnio.ipa` (approximately 25 MB). The subsequent upload returned **Upload succeeded**, **Uploaded Furnio**, exit 0; Apple reported the package processing. This is an upload, not App Review submission, tester distribution or public release. Five bundled frameworks emitted missing-dSYM upload warnings (ExpoImageManipulator, React, ReactNativeDependencies, SDWebImage and hermesvm); track symbol remediation separately. Some device symbols are present in installed Pods and need UUID verification before supplementary upload.
+
+Android rebuilt successfully in 45 seconds with 1.0.0 app configuration and native version name. Dedicated upload-certificate verification passed; refreshed bundle is `output/store/furnio-production.aab`. Google upload remains pending. Source/build checks do not certify the still-disabled deletion processor. Awaiting owner answers on dedicated reviewer-account creation and separate exported/media backups.
+
 ### Release archive and reviewer contact — 14:30 EDT
 
 Owner supplied the private Apple review contact; entered it and verified all four fields visually after reloading App Store Connect. Do not ask for those details again. Review-account credentials remain separate.

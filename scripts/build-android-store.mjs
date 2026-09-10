@@ -53,6 +53,7 @@ assert.equal(embedded.status, 0, 'Cannot inspect embedded app configuration.');
 const configuration = JSON.parse(embedded.stdout);
 assert.equal(configuration.extra?.furnioEnvironment, 'production', 'Bundle is not production.');
 assert.equal(configuration.android?.package, 'ai.furnio.app', 'Unexpected Android package.');
+assert.equal(configuration.version, '1.0.0', 'Unexpected embedded release version.');
 const verification = spawnSync(resolve(dirname(keytool), 'jarsigner'), ['-verify', bundle], {env, encoding:'utf8'});
 assert.equal(verification.status, 0, 'Bundle signature verification failed.');
 assert(verification.stdout.includes('jar verified.'), 'Bundle is not signed.');
