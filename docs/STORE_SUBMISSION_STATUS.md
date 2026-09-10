@@ -2,6 +2,10 @@
 
 ## Current checkpoint — 10 September 2026
 
+### Owner confirmed rights; Apple validation checked
+
+Owner confirmed content rights and requested submission. Saved Apple's affirmative third-party content-rights declaration and verified it on App Information. Clicked Add for Review: Apple returned **Unable to Add for Review**, requiring a build, reviewer Contact Information, privacy-policy URL, privacy-practices disclosures and age-rating answers. Added and saved `https://furnio.ai/privacy`; remaining declarations are not completed. No build is present in the version's Build section. Submission has not occurred. Reviewer contact details were not supplied by the confirmation; request the actual name/email/phone rather than infer them from account data.
+
 ### Apple screenshot order and availability verified
 
 Both approved screenshot sets are now ordered numerically `01` through `06`, verified from Apple's screenshot controls after keyboard reordering (no replacement artwork). Saved free download pricing (`$0.00`) and launch availability for Canada and United States only; both countries show “Available on App Release.” Disabled Apple Silicon Mac and Vision Pro availability to retain the approved phone/tablet release scope. These are listing settings, not a release or review submission.
