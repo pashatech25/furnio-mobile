@@ -2,6 +2,8 @@
 
 Updated 9 September 2026. **The complete deletion workflow is not implemented or enabled.** Account privacy screens, isolated same-account reauthentication, durable native receipts, account fencing and bounded media cleanup are implemented locally. Identity/provider revocation, personal-record cleanup, retention and completion remain. The screen explains the disabled deletion gate. Do not submit the app while it cannot initiate full account deletion.
 
+**Owner policy clarification — 10 September 2026:** retain payment records for **seven years**, for legal and tax purposes. This supersedes the earlier “payment period unknown” notes below. It does not authorize retaining unrelated photos, marketing data or complete profiles for seven years. Backup retention and restore-time deletion handling still require verification. No production deletion gate was enabled by this policy clarification.
+
 ## Local implementation: automation suppression (latest backend milestone)
 
 **Policy input received 9 September, 16:01 Toronto:** the owner supplied the five published legal/privacy URLs; all were read. `PUBLISHED_POLICY_REVIEW.md` maps their commitments and mobile wording gaps. They establish intended 30-day image retention, not payment-record or backup expiry. Those operational periods remain unapproved/unverified. Published policies and deletion gates were not changed; the empty identity-retirement migration placeholder was removed without applying any SQL. The last completed database checkpoint remains 23 migrations.

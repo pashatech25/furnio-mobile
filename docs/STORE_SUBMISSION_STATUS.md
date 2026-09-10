@@ -2,6 +2,10 @@
 
 ## Current checkpoint — 10 September 2026
 
+### Upload signing checkpoint — 10 September
+
+Dedicated Android upload signing implemented and tested (two focused tests and mobile TypeScript pass). First production AAB built successfully in 2m53s; JAR signature verified as Furnio Upload, embedded environment `production`, package `ai.furnio.app`, version `0.1.0`. This is a locally signed bundle, not a Play upload or final 1.0 candidate. See `ANDROID_UPLOAD_SIGNING.md`; rebuild after remaining app changes. Owner confirmed seven-year payment-record retention; recorded in `ACCOUNT_DELETION.md`. Apple still presents a sign-in screen. No website/database/Worker deployment made.
+
 ### Store upload checkpoint — 08:55 EDT
 
 - Google Play default English listing: description, approved 512px icon, 1024×500 feature graphic and all six Android screenshots uploaded and saved. Console confirmed “Your changes have been saved.” Review screen now requests the new AI-asset declaration; owner confirmation requested before making that declaration. Screenshot order still needs final verification (bulk upload used completion order).

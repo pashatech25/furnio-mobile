@@ -59,6 +59,7 @@ const config: ExpoConfig = {
     "expo-sharing",
     "./plugins/with-ios-space-safe-build.cjs",
     "./plugins/with-ios-scene-lifecycle.cjs",
+    "./plugins/with-android-upload-signing.cjs",
   ],
   extra: {
     furnioEnvironment: process.env.EXPO_PUBLIC_APP_MODE ?? "demo",

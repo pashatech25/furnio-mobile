@@ -27,3 +27,4 @@ output/
 *.mobileprovision
 *.keystore
 *.jks
+.local-signing/
