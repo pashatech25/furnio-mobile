@@ -36,7 +36,7 @@ describe("isolated mobile Worker", () => {
       accountDeletionRequestsReady: false,
     });
   });
-  it("exposes privacy review independently without enabling destructive deletion", async () => {
+  it("exposes verified asynchronous deletion intake only with both flags and abuse protection", async () => {
     const response = await worker.fetch(
       new Request("https://mobile.test/v1/capabilities"),
       environment({
@@ -49,7 +49,7 @@ describe("isolated mobile Worker", () => {
     expect(await response.json()).toMatchObject({
       accountDeletionReviewReady: true,
       accountDeletionRequestsReady: true,
-      accountDeletionReady: false,
+      accountDeletionReady: true,
     });
   });
   it("cannot be tricked into an enabled commerce capability by a query", async () => {

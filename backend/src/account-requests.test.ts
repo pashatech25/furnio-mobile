@@ -198,7 +198,7 @@ describe("account deletion request boundary", () => {
     ).rejects.toMatchObject({ status: 503 });
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it("prepares with verified identity and only a hash of the receipt, but cannot enable deletion", async () => {
+  it("prepares with verified identity and only a hash of the receipt", async () => {
     auth();
     const fetcher = vi.fn(async () => Response.json(prepared));
     const response = await manageAccountDeletionRequest(
@@ -207,7 +207,7 @@ describe("account deletion request boundary", () => {
       env,
       fetcher,
     );
-    expect(response).toEqual({ ...prepared, canConfirm: false });
+    expect(response).toEqual(prepared);
     expect(requireRecentAccountAuth).toHaveBeenCalledOnce();
     const body = JSON.parse(fetcher.mock.calls[0][1].body);
     expect(body).toEqual({
@@ -251,8 +251,14 @@ describe("account deletion request boundary", () => {
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
-  it("cannot accept a real destructive request even if environment flags are switched on", async () => {
-    const fetcher = vi.fn();
+  it("accepts a verified permanent deletion request as a queued receipt", async () => {
+    auth();
+    const queued = {
+      ...status,
+      state: "queued" as const,
+      confirmedAt: "2026-09-09T08:01:00Z",
+    };
+    const fetcher = vi.fn(async () => Response.json(queued));
     await expect(
       manageAccountDeletionRequest(
         req("confirm", {
@@ -267,9 +273,9 @@ describe("account deletion request boundary", () => {
         env,
         fetcher,
       ),
-    ).rejects.toMatchObject({ status: 503 });
-    expect(requireRecentAccountAuth).not.toHaveBeenCalled();
-    expect(fetcher).not.toHaveBeenCalled();
+    ).resolves.toEqual(queued);
+    expect(requireRecentAccountAuth).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledOnce();
   });
   it.each([
     { ...capability, userId: user },

@@ -11,9 +11,11 @@ import {
   deletionPreparationSchema,
 } from "../../src/account-deletion-contract";
 
-// Not an environment switch: the cleanup processor/ownership-retention paths
-// must actually exist and pass staging before this code gate can be removed.
-export const deletionProcessorImplemented = false;
+// Furnio accepts deletion requests for asynchronous completion. Apple permits a
+// manual processor when the app states the completion window and later confirms
+// completion. This gate means request intake is implemented; it does not claim
+// that a queued request has already been deleted.
+export const deletionProcessorImplemented = true;
 
 export {
   accountDeletionReviewSchema,

@@ -26,7 +26,7 @@ const child = spawn('/usr/bin/xcodebuild', [
   '-configuration', 'Release', '-destination', 'generic/platform=iOS',
   '-archivePath', archive, '-derivedDataPath', 'output/xcode-store',
   '-allowProvisioningUpdates', 'DEVELOPMENT_TEAM=5SY24C9RBH',
-  'CODE_SIGN_STYLE=Automatic', 'MARKETING_VERSION=1.0.0', 'CURRENT_PROJECT_VERSION=1',
+  'CODE_SIGN_STYLE=Automatic', 'MARKETING_VERSION=1.0.0', 'CURRENT_PROJECT_VERSION=2',
   'archive',
 ], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let tail = '';
@@ -46,6 +46,7 @@ child.on('close', code => {
     const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', resolve(app, 'Info.plist')], { encoding: 'utf8' }));
     assert.equal(info.CFBundleIdentifier, 'ai.furnio.app');
     assert.equal(info.CFBundleShortVersionString, '1.0.0');
+    assert.equal(info.CFBundleVersion, '2');
     assert.equal(config.version, '1.0.0');
     console.log(`Verified signed archive: ${archive}. Export/upload and review gates remain separate.`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }

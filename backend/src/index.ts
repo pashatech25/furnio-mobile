@@ -10,6 +10,7 @@ import {
   AccountPrivacyRateLimitError,
 } from "./account-rate-limits";
 import {
+  deletionProcessorImplemented,
   manageAccountDeletionRequest,
   reviewAccountDeletion,
 } from "./account-deletion";
@@ -163,6 +164,11 @@ export default {
             env.MOBILE_ACCOUNT_REVIEW_ENABLED === "true" &&
             accountPrivacyLimitsReady(env),
           accountDeletionRequestsReady:
+            env.MOBILE_ACCOUNT_REVIEW_ENABLED === "true" &&
+            env.MOBILE_ACCOUNT_REQUESTS_ENABLED === "true" &&
+            accountPrivacyLimitsReady(env),
+          accountDeletionReady:
+            deletionProcessorImplemented &&
             env.MOBILE_ACCOUNT_REVIEW_ENABLED === "true" &&
             env.MOBILE_ACCOUNT_REQUESTS_ENABLED === "true" &&
             accountPrivacyLimitsReady(env),

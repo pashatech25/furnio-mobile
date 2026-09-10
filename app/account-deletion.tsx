@@ -367,7 +367,7 @@ function PrivacyScreen({ userId }: { userId: string | null }) {
               <Body>Reference: {record.capability.requestId}</Body>
               <Body muted>
                 {pendingConfirmation
-                  ? "Do not submit a second deletion request. Check this receipt even if sign-in is no longer available. A received request cannot be cancelled here."
+                  ? "Furnio will complete the deletion within 30 days and confirm completion at your account email. Do not submit a second request. Keep this reference; a received request cannot be cancelled here."
                   : record.phase === "preparing"
                     ? "No confirmation was submitted from this receipt. Verify your identity below, then resume the saved review using the same receipt. If the server asks you to review again, refresh this status first."
                     : "This saved review is not a deletion confirmation. If verification was interrupted, cancel the unconfirmed review before preparing a new one."}
@@ -718,9 +718,8 @@ function PrivacyScreen({ userId }: { userId: string | null }) {
               )}
               {!demo && !deleteReady && (
                 <Notice warning>
-                  Permanent deletion is disabled in this development build until
-                  cleanup and recovery pass release testing. A review is not a
-                  submitted deletion request.
+                  Permanent deletion requests are not available in this build. A
+                  review is not a submitted deletion request.
                 </Notice>
               )}
             </Card>

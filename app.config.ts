@@ -11,6 +11,7 @@ const config: ExpoConfig = {
   backgroundColor: "#f7f5ef",
   ios: {
     bundleIdentifier: "ai.furnio.app",
+    buildNumber: "2",
     appleTeamId: "5SY24C9RBH",
     supportsTablet: true,
     usesAppleSignIn: true,
@@ -21,7 +22,7 @@ const config: ExpoConfig = {
       RCTNewArchEnabled: true,
     },
   },
-  android: { package: "ai.furnio.app" },
+  android: { package: "ai.furnio.app", versionCode: 2 },
   web: {
     bundler: "metro",
     output: "single",
