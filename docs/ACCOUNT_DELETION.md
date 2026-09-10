@@ -4,6 +4,8 @@ Updated 9 September 2026. **The complete deletion workflow is not implemented or
 
 **Owner policy clarification — 10 September 2026:** retain payment records for **seven years**, for legal and tax purposes. This supersedes the earlier “payment period unknown” notes below. It does not authorize retaining unrelated photos, marketing data or complete profiles for seven years. Backup retention and restore-time deletion handling still require verification. No production deletion gate was enabled by this policy clarification.
 
+**Read-only production backup check — 10 September:** Supabase's Furnio-Production scheduled-backups screen lists physical backups dated 3–10 September. The Point in Time screen says the add-on is not enabled. This verifies a current seven-day span of scheduled database backups, not a guarantee about external exports or media backups. Supabase documents that database backups do not include stored media objects. No restore, setting change or backup deletion was performed. Any separately retained exports/media backups still need their owner-confirmed expiry and restore suppression procedure.
+
 ## Local implementation: automation suppression (latest backend milestone)
 
 **Policy input received 9 September, 16:01 Toronto:** the owner supplied the five published legal/privacy URLs; all were read. `PUBLISHED_POLICY_REVIEW.md` maps their commitments and mobile wording gaps. They establish intended 30-day image retention, not payment-record or backup expiry. Those operational periods remain unapproved/unverified. Published policies and deletion gates were not changed; the empty identity-retirement migration placeholder was removed without applying any SQL. The last completed database checkpoint remains 23 migrations.
