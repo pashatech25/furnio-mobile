@@ -22,6 +22,31 @@ const snapshot = {
 };
 afterEach(() => vi.restoreAllMocks());
 describe("mobile billing reads", () => {
+  it.each([true, false])("uses server enrollment for production identity, enrolled=%s", async enrolled => {
+    const rpc = vi.spyOn(NativeDatabase.prototype, "rpc")
+      .mockResolvedValueOnce({ environment: enrolled ? "SANDBOX" : "PRODUCTION", enrolled, active: enrolled })
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce({ ...snapshot, balance: 15 });
+    const response = await worker.fetch(new Request("https://mobile.invalid/v1/billing?store=APP_STORE&environment=SANDBOX", {
+      headers: { Authorization: "Bearer fixture-with-at-least-20-characters" },
+    }), { ...env, ENVIRONMENT: "production" });
+    expect(response.status).toBe(200);
+    expect(rpc.mock.calls[0]?.slice(0, 2)).toEqual(["get_native_customer_store_context", { p_user: userId }]);
+    expect(rpc.mock.calls[1]?.slice(0, 2)).toEqual(enrolled
+      ? ["get_native_sandbox_billing", { p_user: userId }]
+      : ["get_mobile_billing_snapshot", { p_user: userId, p_environment: "PRODUCTION", p_store: "APP_STORE" }]);
+    expect(await response.json()).toMatchObject(enrolled
+      ? { acquisitionEnabled: false, balance: 15, sandbox: { balance: 50 } }
+      : { acquisitionEnabled: false, balance: 50 });
+  });
+  it("does not fall back to real accounting when enrollment lookup fails", async () => {
+    const rpc = vi.spyOn(NativeDatabase.prototype, "rpc").mockRejectedValue(new Error("unavailable"));
+    const response = await worker.fetch(new Request("https://mobile.invalid/v1/billing?store=APP_STORE", {
+      headers: { Authorization: "Bearer fixture-with-at-least-20-characters" },
+    }), { ...env, ENVIRONMENT: "production" });
+    expect(response.status).toBe(502);
+    expect(rpc).toHaveBeenCalledOnce();
+  });
   it("uses verified customer ID and requested device store, not query-supplied ownership", async () => {
     const rpc = vi
       .spyOn(NativeDatabase.prototype, "rpc")

@@ -1,10 +1,17 @@
 import { spawn } from "node:child_process";
 import { createWriteStream, mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { localBuildEnvironment } from "./local-native-environment.mjs";
+import { parseEnv } from "node:util";
+import { localBuildEnvironment, iosCommerceEnvironment } from "./local-native-environment.mjs";
 
 const root = process.cwd();
-const { mode, env } = localBuildEnvironment(root);
+const args = process.argv.slice(2);
+const commerce = args.includes("--native-purchases");
+const prepared = localBuildEnvironment(root, args.filter(arg => arg !== "--native-purchases"));
+const mode = prepared.mode;
+const env = commerce
+  ? iosCommerceEnvironment(prepared.env, parseEnv(readFileSync(resolve(root, ".env.ios-commerce.local"), "utf8")))
+  : prepared.env;
 const deviceId = process.env.FURNIO_IOS_DEVICE_ID;
 if (!deviceId || !/^[A-Za-z0-9-]+$/.test(deviceId)) throw new Error("Set FURNIO_IOS_DEVICE_ID to the connected test device identifier.");
 env.DEVELOPER_DIR = "/Users/alipashaamidi/Downloads/Xcode-beta.app/Contents/Developer";

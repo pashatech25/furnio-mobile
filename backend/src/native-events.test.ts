@@ -4,6 +4,7 @@ import {
   consumeNativeEvents,
   NativeDatabase,
   processNativeEvent,
+  processSandboxEvent,
   receiveNativeWebhook,
 } from "./native-events";
 import { RevenueCatVerifier } from "./revenuecat";
@@ -92,6 +93,46 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("durable native event delivery", () => {
+  it("routes signed Apple sandbox events on production to the isolated inbox", async () => {
+    const env = environment({ ENVIRONMENT: "production" });
+    const rpc = vi.spyOn(NativeDatabase.prototype, "rpc").mockResolvedValue({ eventId: event.id, state: "pending" });
+    await receiveNativeWebhook(await request(env), env);
+    expect(rpc).toHaveBeenCalledWith("accept_verified_sandbox_webhook", expect.anything(), expect.anything());
+    expect(env.NATIVE_EVENTS.send).toHaveBeenCalledWith({ sandboxEventId: event.id }, { contentType: "json" });
+    expect(rpc.mock.calls.some(([method]) => method === "accept_verified_native_webhook")).toBe(false);
+  });
+  it("does not acknowledge a sandbox event when database enrollment rejects it", async () => {
+    const env = environment({ ENVIRONMENT: "production" });
+    vi.spyOn(NativeDatabase.prototype, "rpc").mockRejectedValue(new HttpError(403, "Not enrolled"));
+    await expect(receiveNativeWebhook(await request(env), env)).rejects.toThrow("Not enrolled");
+    expect(env.NATIVE_EVENTS.send).not.toHaveBeenCalled();
+  });
+  it("records verified sandbox refunds before grants and never calls real accounting", async () => {
+    const env = environment({ ENVIRONMENT: "production" });
+    const rpc = vi.spyOn(NativeDatabase.prototype, "rpc")
+      .mockResolvedValueOnce({ event, state: "pending", kind: "consumable", refundKnown: true, recoveryReady: true })
+      .mockResolvedValue(null);
+    const verifier = new RevenueCatVerifier({ projectId: "project", apiKey: "x".repeat(40), appIds: [event.app_id] });
+    vi.spyOn(verifier, "verify").mockResolvedValue({
+      purchase: { userId: user, environment: "SANDBOX", store: "APP_STORE", transactionId: event.transaction_id,
+        productId: event.product_id, purchasedAt: new Date(event.purchased_at_ms).toISOString(), familyId: "fixture", periodEnd: null, priceAmount: null, currency: null },
+      grant: true, refund: true, subscription: null,
+    });
+    await processSandboxEvent(event.id, env, new NativeDatabase(env), verifier);
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual([
+      "get_native_sandbox_event", "refund_verified_sandbox_purchase", "record_verified_sandbox_purchase", "finish_native_sandbox_event",
+    ]);
+    expect(verifier.verify).toHaveBeenCalledWith(event, "consumable", { refundKnown: true });
+  });
+  it("quarantines a production receipt found in the sandbox inbox without verification or grants", async () => {
+    const env = environment({ ENVIRONMENT: "production" });
+    const rpc = vi.spyOn(NativeDatabase.prototype, "rpc")
+      .mockResolvedValueOnce({ event: { ...event, environment: "PRODUCTION" }, state: "pending", kind: "consumable", recoveryReady: true })
+      .mockResolvedValue(null);
+    await processSandboxEvent(event.id, env);
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual(["get_native_sandbox_event", "finish_native_sandbox_event"]);
+    expect(rpc.mock.calls[1]?.[1]).toEqual({ p_id: event.id, p_state: "quarantined" });
+  });
   it("carries known verified-ingress refunds into independent purchase verification", async () => {
     vi.spyOn(NativeDatabase.prototype, "rpc")
       .mockResolvedValueOnce({

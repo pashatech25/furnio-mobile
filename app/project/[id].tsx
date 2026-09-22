@@ -81,7 +81,7 @@ export default function ProjectDetail() {
           onPress={() =>
             router.push({
               pathname: "/result/[jobId]",
-              params: { jobId: job.id, projectId: id },
+              params: { jobId: job.id, projectId: id, service: job.featureSlug },
             })
           }
         >

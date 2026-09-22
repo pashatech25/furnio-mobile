@@ -73,8 +73,9 @@ const sample: JobStatusResponse = {
   error: null,
 };
 export default function Result() {
-  const { jobId, previewProcessing } = useLocalSearchParams<{
+  const { jobId, previewProcessing, service } = useLocalSearchParams<{
     jobId: string;
+    service?: string;
     previewProcessing?: string;
   }>();
   const { user } = useApp();
@@ -83,6 +84,7 @@ export default function Result() {
     <ResultScreen
       key={`${user?.id ?? "signed-out"}:${jobId}`}
       jobId={jobId}
+      service={service}
       previewProcessing={previewProcessing}
     />
   );
@@ -90,9 +92,11 @@ export default function Result() {
 
 function ResultScreen({
   jobId,
+  service,
   previewProcessing,
 }: {
   jobId: string;
+  service?: string;
   previewProcessing?: string;
 }) {
   const app = useApp();
@@ -228,7 +232,7 @@ function ResultScreen({
       return () => clearTimeout(timer);
     }
   }, []);
-  const outputs = resultOutputs(job);
+  const outputs = resultOutputs(job, service);
   const output = selectedResult(outputs, selected);
   useEffect(() => {
     if (output && output.assetId !== selected) setSelected(output.assetId);

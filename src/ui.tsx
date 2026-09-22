@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -278,6 +278,7 @@ export function Page({
   scrollEnabled = true,
   hideHeader = false,
   footer,
+  overlay,
 }: {
   children: React.ReactNode;
   title?: string;
@@ -286,6 +287,7 @@ export function Page({
   scrollEnabled?: boolean;
   hideHeader?: boolean;
   footer?: React.ReactNode;
+  overlay?: React.ReactNode;
 }) {
   return (
     <SafeAreaView
@@ -348,6 +350,7 @@ export function Page({
         </ScrollView>
         {footer && <SafeAreaView edges={["bottom"]} style={{ backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.line }}><View style={{ paddingHorizontal: 23, paddingVertical: 12, width: "100%", maxWidth: 760, alignSelf: "center" }}>{footer}</View></SafeAreaView>}
       </KeyboardAvoidingView>
+      {overlay && <View accessibilityViewIsModal style={StyleSheet.absoluteFill}>{overlay}</View>}
     </SafeAreaView>
   );
 }
@@ -369,6 +372,14 @@ export function BottomSheet({ visible, onClose, children }: { visible: boolean; 
 type Show = (title: string, message: string, actions?: DialogAction[]) => void;
 const DialogContext = createContext<Show>(() => undefined);
 export function DialogProvider({ children }: { children: React.ReactNode }) {
+  const pendingAction = useRef<(() => void) | undefined>(undefined);
+  const closing = useRef(false);
+  const finishDismissal = () => {
+    const action = pendingAction.current;
+    pendingAction.current = undefined;
+    closing.current = false;
+    action?.();
+  };
   const [dialog, setDialog] = useState<{
     title: string;
     message: string;
@@ -386,6 +397,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
         transparent
         animationType="fade"
         onRequestClose={() => setDialog(null)}
+        onDismiss={finishDismissal}
       >
         <View
           style={{
@@ -422,8 +434,13 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
                 title={action.title}
                 secondary={action.secondary}
                 onPress={() => {
+                  if (closing.current) return;
+                  closing.current = true;
+                  pendingAction.current = action.action;
                   setDialog(null);
-                  action.action?.();
+                  // UIKit must finish dismissing before an action presents
+                  // another controller or changes the navigation stack.
+                  if (Platform.OS !== "ios") finishDismissal();
                 }}
               />
             ))}

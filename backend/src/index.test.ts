@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { boundedJson, requireCustomer } from "./index";
+import * as nativeEvents from "./native-events";
 import { accountPrivacyLimitFixture } from "../tests/account-rate-limit-fixture";
 const userId = "11111111-1111-4111-8111-111111111111";
 function environment(overrides: Partial<Env> = {}): Env {
@@ -19,6 +20,23 @@ function environment(overrides: Partial<Env> = {}): Env {
 }
 afterEach(() => vi.restoreAllMocks());
 describe("isolated mobile Worker", () => {
+  it("acknowledges a durably accepted RevenueCat webhook with HTTP 200", async () => {
+    vi.spyOn(nativeEvents, "receiveNativeWebhook").mockResolvedValue({ accepted: true, state: "pending" });
+    const response = await worker.fetch(
+      new Request("https://mobile.test/v1/webhooks/revenuecat", { method: "POST" }),
+      environment(),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accepted: true, state: "pending" });
+  });
+  it("does not acknowledge failed RevenueCat delivery", async () => {
+    vi.spyOn(nativeEvents, "receiveNativeWebhook").mockRejectedValue(new Error("queue unavailable"));
+    const response = await worker.fetch(
+      new Request("https://mobile.test/v1/webhooks/revenuecat", { method: "POST" }),
+      environment(),
+    );
+    expect(response.status).toBe(502);
+  });
   it("reports every unfinished capability as unavailable", async () => {
     const response = await worker.fetch(
       new Request("https://mobile.test/v1/capabilities"),

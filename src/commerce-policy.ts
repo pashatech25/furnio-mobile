@@ -1,4 +1,6 @@
-// Owner decision, 2026-09-09: v1 is a free companion to Furnio's website.
-// Deliberately NOT an environment flag. Re-enabling requires an explicit
-// product decision, store-policy review, and new release acceptance.
-export const nativeCommerceAllowed: boolean = false;
+import { Platform } from "react-native";
+
+// Owner-approved iOS commerce restoration. Android stays consumption-only.
+// Acquisition additionally requires the build flag and server readiness checks;
+// recovery remains independently gated so disabling sales cannot strand payments.
+export const nativeCommerceAllowed: boolean = Platform.OS === "ios";

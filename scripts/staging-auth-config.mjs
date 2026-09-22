@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { withNativeAuthRedirects } from './native-auth-redirects.mjs';
 
 const staging = "bcrobmrimzkvfrnqarmv";
 const production = "sgsjkgfwgxmlqcgyuyeh";
@@ -51,9 +52,6 @@ if (mode !== "--inspect") {
   const source = configurations.get(production);
   const before = configurations.get(staging);
   assert.equal(source.sms_provider, "twilio_verify");
-  const redirects = new Set((before.uri_allow_list ?? "").split(",").filter(Boolean));
-  for (const uri of ["furnio://auth/callback", "furnio://auth/callback?type=recovery", "furnio://auth/deletion-callback"])
-    redirects.add(uri);
   const patch = {
     rate_limit_sms_sent: 6,
     mailer_subjects_confirmation: "Confirm your Furnio test account",
@@ -67,7 +65,7 @@ if (mode !== "--inspect") {
     external_phone_enabled: false,
     external_apple_enabled: true,
     external_apple_client_id: "ai.furnio.app",
-    uri_allow_list: [...redirects].join(","),
+    uri_allow_list: withNativeAuthRedirects(before.uri_allow_list),
     site_url: "https://furnio-mobile-staging.amidi-alipasha.workers.dev",
   };
   // Deliberately no production PATCH, no secret files and no auto-confirm bypass.

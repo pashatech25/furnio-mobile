@@ -6,6 +6,7 @@ import * as Apple from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import { config, demo } from "../config";
 import { secureStorage } from "./secure-storage";
+import { openNativeAuthSession } from "./browser-session";
 
 export const supabase = demo
   ? null
@@ -54,7 +55,7 @@ export async function googleSignIn() {
     },
   });
   if (error) throw error;
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  const result = await openNativeAuthSession(data.url, redirectTo);
   if (result.type === "success") {
     const url = new URL(result.url);
     const expected = new URL(redirectTo);

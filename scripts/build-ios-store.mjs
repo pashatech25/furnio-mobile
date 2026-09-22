@@ -3,11 +3,18 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { localBuildEnvironment } from './local-native-environment.mjs';
+import { parseEnv } from 'node:util';
+import { localBuildEnvironment, iosCommerceEnvironment } from './local-native-environment.mjs';
+import { storeBuildArguments } from './store-build-number.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const buildNumber = '2';
-const { mode, env } = localBuildEnvironment(root);
+const { buildNumber, args } = storeBuildArguments(process.argv.slice(2));
+const commerce = args.includes('--native-purchases');
+const prepared = localBuildEnvironment(root, args.filter(arg => arg !== '--native-purchases'));
+const mode = prepared.mode;
+const env = commerce
+  ? iosCommerceEnvironment(prepared.env, parseEnv(readFileSync(resolve(root, '.env.ios-commerce.local'), 'utf8')))
+  : prepared.env;
 assert.equal(mode, 'production', 'Archive requires explicit --production.');
 env.DEVELOPER_DIR = '/Applications/Xcode.app/Contents/Developer';
 const version = execFileSync('/usr/bin/xcodebuild', ['-version'], { env, encoding: 'utf8' });

@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import Purchases, {
   PRODUCT_CATEGORY,
+  REFUND_REQUEST_STATUS,
   type PurchasesStoreProduct,
 } from "react-native-purchases";
 import { z } from "zod";
@@ -112,6 +113,43 @@ export function loadStoreProducts(
     ];
     await requireUser(userId);
     return products;
+  });
+}
+
+/** Refund requests are Apple decisions, never local credit adjustments. */
+export function loadRefundProducts(
+  userId: string,
+  catalog: { productId: string; interval: "month" | "one_time" }[],
+) {
+  return serial(async () => {
+    await identify(userId, true);
+    const info = await Purchases.getCustomerInfo();
+    await requireCurrentUser(userId);
+    const owned = new Set(info.allPurchasedProductIdentifiers);
+    const result: PurchasesStoreProduct[] = [];
+    for (const interval of ["month", "one_time"] as const) {
+      const ids = catalog.filter(item => item.interval === interval && owned.has(item.productId)).map(item => item.productId);
+      if (ids.length) result.push(...await Purchases.getProducts(ids,
+        interval === "month" ? PRODUCT_CATEGORY.SUBSCRIPTION : PRODUCT_CATEGORY.NON_SUBSCRIPTION));
+    }
+    await requireCurrentUser(userId);
+    return result.filter(item => owned.has(item.identifier) && catalog.some(allowed => allowed.productId === item.identifier));
+  });
+}
+
+export function requestAppleRefund(userId: string, product: PurchasesStoreProduct) {
+  return serial(async () => {
+    if (Platform.OS !== "ios") throw new Error("Apple refund requests require iOS.");
+    await identify(userId, true);
+    const info = await Purchases.getCustomerInfo();
+    await requireCurrentUser(userId);
+    if (!info.allPurchasedProductIdentifiers.includes(product.identifier))
+      throw new Error("This purchase is not linked to the current account.");
+    const status = await Purchases.beginRefundRequestForProduct(product);
+    await requireCurrentUser(userId);
+    if (status === REFUND_REQUEST_STATUS.SUCCESS) return "submitted" as const;
+    if (status === REFUND_REQUEST_STATUS.USER_CANCELLED) return "cancelled" as const;
+    return "unavailable" as const;
   });
 }
 const intentResult = z.object({

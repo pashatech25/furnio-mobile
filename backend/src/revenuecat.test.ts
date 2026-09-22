@@ -175,7 +175,9 @@ const storeProduct = {
   id: "prod1",
   store_identifier: "pack20",
   app_id: "app_apple",
-  type: "one_time",
+  // RevenueCat classifies Apple credit-pack IAPs as consumables. The older
+  // generic one_time value remains accepted by the verifier for compatibility.
+  type: "consumable",
 };
 function history(event: Partial<NativeEvent> = {}) {
   const body = {
@@ -488,6 +490,15 @@ describe("independent RevenueCat API verification", () => {
     const { client } = verifier([
       { items: [storePurchase], next_page: null },
       { ...storeProduct, app_id: "unapproved" },
+    ]);
+    await expect(client.verify(base, "consumable")).rejects.toMatchObject({
+      status: 409,
+    });
+  });
+  it("rejects a non-consumable product for a credit-pack grant", async () => {
+    const { client } = verifier([
+      { items: [storePurchase], next_page: null },
+      { ...storeProduct, type: "non_consumable" },
     ]);
     await expect(client.verify(base, "consumable")).rejects.toMatchObject({
       status: 409,

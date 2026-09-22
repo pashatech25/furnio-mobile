@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { nativeCommerceAllowed } from "./commerce-policy";
 
 const io = vi.hoisted(() => ({ api: vi.fn(), session: vi.fn(), sdk: vi.fn() }));
-vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
+vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
 vi.mock("./config", () => ({ demo: false }));
 vi.mock("./auth/client", () => ({
   supabase: { auth: { getSession: io.session } },
@@ -26,7 +26,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("website-only companion release", () => {
+describe("Android website-only companion protections", () => {
   it("cannot be turned into a store checkout by an old environment flag", async () => {
     vi.stubEnv("EXPO_PUBLIC_PURCHASES_ENABLED", "true");
     vi.resetModules();
@@ -79,19 +79,23 @@ describe("website-only companion release", () => {
     expect(home).toContain('title="View credits"');
     expect(home).not.toContain('title="Add credits"');
   });
-  it("excludes the deferred store SDK from native linking and active app configuration", () => {
+  it("excludes the store SDK from Android linking without the old Android plugin", () => {
     const packageJson = JSON.parse(
       readFileSync(resolve("package.json"), "utf8"),
     );
-    expect(packageJson.dependencies["react-native-purchases"]).toBeUndefined();
-    expect(packageJson.expo.autolinking.exclude).toContain(
+    expect(packageJson.dependencies["react-native-purchases"]).toBe("10.9.0");
+    expect(packageJson.expo.autolinking.android.exclude).toContain(
       "react-native-purchases",
     );
+    expect(packageJson.expo.autolinking.exclude).toBeUndefined();
+    const fallback = readFileSync(resolve("src/NativePurchases.tsx"), "utf8");
+    expect(fallback).not.toMatch(/from\s+["']/);
     expect(readFileSync(resolve("app.config.ts"), "utf8")).not.toContain(
       "with-store-purchases",
     );
     const state = readFileSync(resolve("src/state.tsx"), "utf8");
-    expect(state).toContain("readWebsiteBilling(api)");
+    expect(state).toContain("readCustomerBilling(api, mobileApi,");
+    expect(state).toContain('Platform.OS === "ios" && Boolean(process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY?.startsWith("appl_"))');
     expect(state).not.toMatch(/\/v1\/billing|capabilitiesSchema/);
   });
 });

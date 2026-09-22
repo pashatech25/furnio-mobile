@@ -7,12 +7,12 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import { z } from "zod";
 import { supabase } from "./auth/client";
 import { config, demo } from "./config";
 import { createApi } from "./api/client";
-import { readWebsiteBilling } from "./api/website-billing";
+import { readCustomerBilling } from "./api/customer-billing";
 import {
   projectSchema,
   runtimeSchema,
@@ -206,8 +206,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
       if (!current()) return;
       setProjects(list.projects);
-      // Read the existing customer wallet. No native purchase tables or store SDK required.
-      const next = await readWebsiteBilling(api);
+      const next = await readCustomerBilling(api, mobileApi,
+        Platform.OS === "ios" && Boolean(process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY?.startsWith("appl_")));
       if (current()) setBilling(next);
     } catch (error) {
       if (current())

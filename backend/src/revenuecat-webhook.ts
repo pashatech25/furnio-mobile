@@ -39,6 +39,7 @@ export async function verifyWebhook(
     signingSecret: string;
     appIds: readonly string[];
     environment: "SANDBOX" | "PRODUCTION";
+    allowIsolatedSandbox?: boolean;
   },
   now = Date.now(),
 ): Promise<{ event: NativeEvent; bodyHash: string }> {
@@ -103,7 +104,8 @@ export async function verifyWebhook(
   const event = parsed.data.event;
   if (
     !config.appIds.includes(event.app_id) ||
-    event.environment !== config.environment
+    (event.environment !== config.environment &&
+      !(config.allowIsolatedSandbox === true && event.environment === "SANDBOX" && event.store === "APP_STORE"))
   )
     throw new HttpError(403, "Wrong native app or store environment.");
   // Do not infer identity from matching email/name, RevenueCat aliases or family

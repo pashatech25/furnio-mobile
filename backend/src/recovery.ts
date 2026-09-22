@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { boundedBytes, HttpError } from "./http";
-import { NativeDatabase, nativeConfiguration } from "./native-events";
+import { NativeDatabase, nativeConfiguration, customerStoreContext } from "./native-events";
 import { RevenueCatVerifier } from "./revenuecat";
 
 const statusSchema = z.object({
@@ -33,12 +33,13 @@ export async function requestRecovery(
   database = new NativeDatabase(env),
 ) {
   const config = nativeConfiguration(env);
+  const context = await customerStoreContext(userId, env, database);
   if (request.method === "GET")
     return database.rpc(
-      "get_native_recovery_status",
+      context.enrolled ? "get_sandbox_recovery_status" : "get_native_recovery_status",
       {
         p_user: userId,
-        p_environment: config.environment,
+        p_environment: context.environment,
       },
       statusSchema,
     );
@@ -63,16 +64,16 @@ export async function requestRecovery(
       "Purchase recovery accepts no client payment claims.",
     );
   const result = await database.rpc(
-    "begin_native_purchase_recovery",
+    context.enrolled ? "begin_sandbox_purchase_recovery" : "begin_native_purchase_recovery",
     {
       p_user: userId,
-      p_environment: config.environment,
+      p_environment: context.environment,
     },
     startedSchema,
   );
   if (result.enqueue)
     await env.NATIVE_EVENTS.send(
-      { recoveryId: result.runId },
+      context.enrolled ? { sandboxRecoveryId: result.runId } : { recoveryId: result.runId },
       { contentType: "json" },
     );
   return { status: result.status, checkedAt: result.checkedAt };
@@ -85,15 +86,17 @@ export async function processRecovery(
   env: Env,
   database = new NativeDatabase(env),
   verifier?: RevenueCatVerifier,
+  isolatedSandbox = false,
 ) {
   const config = nativeConfiguration(env);
+  if (isolatedSandbox && env.ENVIRONMENT !== "production") throw new HttpError(409, "Invalid isolated recovery environment.");
   const claim = await database.rpc(
-    "claim_native_purchase_recovery",
+    isolatedSandbox ? "claim_sandbox_purchase_recovery" : "claim_native_purchase_recovery",
     { p_run: runId },
     claimSchema.nullable(),
   );
   if (!claim) return;
-  if (claim.environment !== config.environment)
+  if (claim.environment !== (isolatedSandbox ? "SANDBOX" : config.environment))
     throw new HttpError(409, "Recovery environment mismatch.");
   if (claim.phase === "discovering") {
     const trusted =
@@ -109,7 +112,7 @@ export async function processRecovery(
       claim.cursor,
     );
     await database.rpc(
-      "save_native_recovery_page",
+      isolatedSandbox ? "save_sandbox_recovery_page" : "save_native_recovery_page",
       {
         p_run: runId,
         p_lease: claim.leaseId,
@@ -123,12 +126,12 @@ export async function processRecovery(
     if (claim.eventIds.length)
       await env.NATIVE_EVENTS.sendBatch(
         claim.eventIds.map((eventId) => ({
-          body: { eventId },
+          body: isolatedSandbox ? { sandboxEventId: eventId } : { eventId },
           contentType: "json" as const,
         })),
       );
     await database.rpc(
-      "finish_native_recovery_dispatch",
+      isolatedSandbox ? "finish_sandbox_recovery_dispatch" : "finish_native_recovery_dispatch",
       {
         p_run: runId,
         p_lease: claim.leaseId,
@@ -138,5 +141,5 @@ export async function processRecovery(
     );
     if (!claim.eventIds.length) return;
   }
-  await env.NATIVE_EVENTS.send({ recoveryId: runId }, { contentType: "json" });
+  await env.NATIVE_EVENTS.send(isolatedSandbox ? { sandboxRecoveryId: runId } : { recoveryId: runId }, { contentType: "json" });
 }

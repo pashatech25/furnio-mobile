@@ -15,3 +15,25 @@ export function allowChallengeNavigation(
     return false;
   }
 }
+
+// Modern Android WebView's WebMessageListener supplies sourceOrigin, not
+// the document URL. iOS and Android's legacy bridge supply the full URL.
+// Top-level navigation is still pinned above, and Challenge independently
+// requires the current random nonce and a bounded, valid token payload.
+export function allowChallengeMessageSource(
+  challengeUrl: string,
+  sourceUrl: string,
+  platform: string,
+): boolean {
+  try {
+    const owned = new URL(challengeUrl);
+    const source = new URL(sourceUrl);
+    if (source.origin !== owned.origin || source.username || source.password)
+      return false;
+    if (source.pathname === owned.pathname) return true;
+    return platform === "android" &&
+      (sourceUrl === owned.origin || sourceUrl === `${owned.origin}/`);
+  } catch {
+    return false;
+  }
+}

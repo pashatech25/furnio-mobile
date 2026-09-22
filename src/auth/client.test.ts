@@ -6,6 +6,7 @@ const auth = vi.hoisted(() => ({
   openAuthSessionAsync: vi.fn(),
 }));
 vi.mock("react-native-url-polyfill/auto", () => ({}));
+vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({ auth }),
   processLock: vi.fn(),

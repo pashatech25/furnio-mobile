@@ -8,8 +8,21 @@ export type ResultOutput = {
   source?: NonNullable<JobStatusResponse["results"]>[number]["source"];
 };
 
-export function resultOutputs(job: JobStatusResponse | null): ResultOutput[] {
+export function resultOutputs(job: JobStatusResponse | null, service?: string): ResultOutput[] {
   if (!job) return [];
+  // Only multi-view produces several deliverables. Mask workflows expose their
+  // sequential region steps too, but those are not finished customer images.
+  if (service !== "multiview") {
+    if (job.status !== "succeeded" || !job.resultAssetId) return [];
+    const final = job.results?.find((item) => item.assetId === job.resultAssetId);
+    return [{
+      assetId: job.resultAssetId,
+      accessLevel: job.accessLevel,
+      resultUrl: job.accessLevel === "trial_locked" ? job.previewUrl : job.resultUrl,
+      stepIndex: 0,
+      source: final?.source,
+    }];
+  }
   if (job.results?.length) {
     const unique = [
       ...new Map(

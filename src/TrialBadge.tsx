@@ -4,6 +4,7 @@ import { useFocusEffect } from "expo-router";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import Svg, { Path } from "react-native-svg";
 import { stopOptionalAudio } from "./audio-cleanup";
+import { pencilAudioMode, pencilDurationMs, startPencilAudio } from "./handwriting-audio";
 
 // Website hero-trial-script uses --color-accent-hover for text and currentColor underline.
 const trialBadgeColor = "#a84d30";
@@ -14,18 +15,25 @@ export function TrialBadge({ enabled, limit }: { enabled: boolean; limit: number
   const underline = useRef(new Animated.Value(0)).current;
   const [reduce, setReduce] = useState<boolean | null>(null);
   const [focused, setFocused] = useState(false);
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
   useFocusEffect(useCallback(() => {
     setFocused(true);
     return () => setFocused(false);
   }, []));
-  const player = useAudioPlayer(require("../assets/pencil-writing.mp3"));
+  const player = useAudioPlayer(require("../assets/pencil-writing.mp3"), { downloadFirst: true });
   const { isLoaded } = useAudioPlayerStatus(player);
   const [audioWaitExpired, setAudioWaitExpired] = useState(false);
-  const audioReady = isLoaded || audioWaitExpired;
+  // Observe actual loading separately from the timeout. Previously, once the
+  // timeout made audioReady=true, a late load never triggered audio playback.
   useEffect(() => {
+    const subscription = AppState.addEventListener("change", state => setForeground(state === "active"));
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (isLoaded) return;
     const timeout = setTimeout(() => setAudioWaitExpired(true), 3000);
     return () => clearTimeout(timeout);
-  }, []);
+  }, [isLoaded]);
   useEffect(() => {
     let alive = true;
     void AccessibilityInfo.isReduceMotionEnabled().then(
@@ -40,26 +48,25 @@ export function TrialBadge({ enabled, limit }: { enabled: boolean; limit: number
     // motion initially reveals the finished badge before resetting its animation.
     if (!enabled || !focused || reduce === null) { writing.setValue(0); underline.setValue(0); return; }
     if (reduce) { writing.setValue(1); underline.setValue(1); return; }
-    if (!audioReady) return;
+    if (!foreground) return;
+    if (!isLoaded) {
+      // Never block sign-in if an optional sound cannot load.
+      writing.setValue(audioWaitExpired ? 1 : 0);
+      underline.setValue(audioWaitExpired ? 1 : 0);
+      return;
+    }
     writing.setValue(0); underline.setValue(0);
     // ffprobe: supplied original MP3 is 2.952 seconds. Prefer decoded duration.
-    const duration = player.isLoaded && player.duration > 0 ? Math.round(player.duration * 1000) : 2952;
+    const duration = player.duration > 0 ? Math.round(player.duration * 1000) : pencilDurationMs;
     const textDuration = Math.round(duration * 0.72);
     const animation = Animated.sequence([
-      Animated.timing(writing, { toValue: 1, duration: textDuration, easing: Easing.linear, useNativeDriver: false }),
-      Animated.timing(underline, { toValue: 1, duration: duration - textDuration, easing: Easing.linear, useNativeDriver: false }),
+      Animated.timing(writing, { toValue: 1, duration: textDuration, easing: Easing.linear, useNativeDriver: false, isInteraction: false }),
+      Animated.timing(underline, { toValue: 1, duration: duration - textDuration, easing: Easing.linear, useNativeDriver: false, isInteraction: false }),
     ]);
     let cancelled = false;
     async function start() {
       try {
-        await setAudioModeAsync({ playsInSilentMode: false, shouldPlayInBackground: false, interruptionMode: "mixWithOthers", allowsRecording: false });
-        if (cancelled) return;
-        if (player.isLoaded) {
-          await player.seekTo(0);
-          if (cancelled) return;
-          player.volume = 0.4;
-          player.play();
-        }
+        await startPencilAudio(player, () => setAudioModeAsync(pencilAudioMode), () => cancelled || AppState.currentState !== "active");
       } catch { /* Audio failure must not hide the promotion or block login. */ }
       if (!cancelled) animation.start();
     }
@@ -71,7 +78,7 @@ export function TrialBadge({ enabled, limit }: { enabled: boolean; limit: number
       }
     });
     return () => { cancelled = true; background.remove(); animation.stop(); stopOptionalAudio(player); };
-  }, [enabled, focused, reduce, audioReady, player, writing, underline]);
+  }, [enabled, focused, foreground, reduce, isLoaded, audioWaitExpired, player, writing, underline]);
   if (!enabled || !Number.isInteger(limit) || limit < 1) return null;
   return <View accessibilityLabel={`${limit} edits on us`} style={{ position: "absolute", right: 23, top: 87, width: 210, transform: [{ rotate: "-4deg" }] }}>
     <Animated.View style={{ width: writing.interpolate({inputRange:[0,1],outputRange:[0,210]}), overflow: "hidden" }}>

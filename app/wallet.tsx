@@ -5,6 +5,7 @@ import { useFocusEffect } from "expo-router";
 import { WalletCards } from "lucide-react-native";
 import { useApp } from "../src/state";
 import { demo } from "../src/config";
+import { NativePurchases } from "../src/NativePurchases";
 import {
   Body,
   Button,
@@ -114,16 +115,17 @@ function WalletScreen() {
         Your credits and projects stay with the same account on the app and
         website. Your existing credit expiry and rollover rules are unchanged.
       </Body>
-      <Card>
+      {!(Platform.OS === "ios" && process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY?.startsWith("appl_")) && <Card>
         <Heading small>{Platform.OS === "android" ? "Credits & subscriptions" : "Your Furnio account"}</Heading>
         <Body>{purchaseGuidance(Platform.OS)}</Body>
-      </Card>
+      </Card>}
       <Button
         title="Refresh balance"
         secondary
         busy={busy}
         onPress={() => void refresh()}
       />
+      <NativePurchases />
       {subscriptions.map((subscription) => (
         <Card key={subscription.id}>
           <View style={styles.between}>

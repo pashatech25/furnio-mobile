@@ -9,9 +9,9 @@
   },
   "expo": {
     "autolinking": {
-      "exclude": [
-        "react-native-purchases"
-      ]
+      "android": {
+        "exclude": ["react-native-purchases"]
+      }
     }
   },
   "scripts": {
@@ -66,6 +66,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-purchases": "10.9.0",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.2",
@@ -82,7 +83,6 @@
     "@types/node": "26.4.0",
     "@types/react": "19.2.4",
     "prettier": "3.6.2",
-    "react-native-purchases": "10.9.0",
     "typescript": "6.0.3",
     "vitest": "4.1.11",
     "wrangler": "4.129.1"

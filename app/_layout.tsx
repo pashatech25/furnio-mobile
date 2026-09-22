@@ -1,12 +1,13 @@
 import { router, Stack, useSegments } from "expo-router";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppProvider, useApp } from "../src/state";
 import { NotificationLifecycle } from "../src/notification-lifecycle";
 import { editorNavigationOptions } from "../src/editor/navigation-options";
 import { ExportRecoveryNotice } from "../src/results/ExportRecoveryNotice";
+import { WorkspaceOpening } from "../src/WorkspaceOpening";
 import {
   Body,
   Button,
@@ -34,7 +35,12 @@ function Navigation() {
   const privacyRoute = segments[0] === "account-deletion";
   const verified =
     !!user && !!trial && (!trial.phoneRequired || trial.phoneVerified);
-  if (loading) return <ActivityIndicator color={colors.ink} />;
+  // Keep Android's root navigator alive through auth/phone transitions. Removing
+  // it while a warm OAuth intent is being consumed loops Expo's nested state.
+  // iOS keeps its already-tested loading and navigator lifecycle.
+  const android = Platform.OS === "android";
+  const openingWorkspace = !!user && !trial && !authenticationRoute && !privacyRoute;
+  if (loading && !android) return <WorkspaceOpening error={null} retry={() => {}} signOut={() => {}} privacy={() => {}} />;
   if (devicePrivacyError && !privacyRoute && !authenticationRoute)
     return (
       <Page>
@@ -60,39 +66,25 @@ function Navigation() {
         />
       </Page>
     );
-  if (user && !trial && !authenticationRoute && !privacyRoute)
+  if (openingWorkspace && !android)
     return (
-      <Page>
-        <Heading>Opening your workspace.</Heading>
-        <Body>{error ?? "Checking your account and verification status…"}</Body>
-        {!!error && <Button title="Try again" onPress={() => void refresh()} />}
-        <Button
-          title="Sign out"
-          secondary
-          onPress={() =>
+      <WorkspaceOpening
+        error={error}
+        retry={() => void refresh()}
+        signOut={() =>
             void signOut().catch(() =>
               show(
                 "Sign out could not finish",
                 "Please try again. This app has not confirmed sign-out.",
               ),
             )
-          }
-        />
-        <Button
-          title="Account privacy"
-          secondary
-          onPress={() => router.push("/account-deletion")}
-        />
-      </Page>
-    );
-  return (
-    <>
-      <NotificationLifecycle
-        userId={verified ? user!.id : null}
-        ready={!loading && (!user || verified)}
+        }
+        privacy={() => router.push("/account-deletion")}
       />
+    );
+  const navigator = (
       <Stack
-        key={user?.id ?? "signed-out"}
+        key={android ? "android-root" : user?.id ?? "signed-out"}
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.bg },
@@ -122,8 +114,22 @@ function Navigation() {
         <Stack.Screen name="account-deletion" />
         <Stack.Screen name="reset-password" />
       </Stack>
-    </>
   );
+  return <>
+    <NotificationLifecycle userId={verified ? user!.id : null}
+      ready={!loading && (!user || verified)} />
+    {android ? <View style={{ flex: 1 }}>
+      <View style={{ flex: 1 }} pointerEvents={loading || openingWorkspace ? "none" : "auto"}
+        importantForAccessibility={loading || openingWorkspace ? "no-hide-descendants" : "auto"}>
+        {navigator}
+      </View>
+      {(loading || openingWorkspace) && <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.bg }}>
+        <WorkspaceOpening error={loading ? null : error} retry={() => void refresh()}
+          signOut={() => { void signOut().catch(() => show("Sign out could not finish", "Please reconnect and try again.")); }}
+          privacy={() => router.push("/account-deletion")} />
+      </View>}
+    </View> : navigator}
+  </>;
 }
 export default function RootLayout() {
   const [loaded, error] = useFonts({

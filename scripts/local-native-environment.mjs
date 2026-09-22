@@ -83,3 +83,13 @@ export function localBuildEnvironment(root, args = process.argv.slice(2)) {
       : {};
   return { mode, env: nativeBuildEnvironment(mode, process.env, values) };
 }
+
+// Called only by the iOS archive entry point. The shared Android build path
+// continues to reject RevenueCat fields and pin purchases off.
+export function iosCommerceEnvironment(env, values) {
+  assert.equal(env.EXPO_PUBLIC_APP_MODE, "production");
+  assert.deepEqual(Object.keys(values), ["EXPO_PUBLIC_REVENUECAT_IOS_KEY"]);
+  assert(/^appl_[A-Za-z0-9]+$/.test(values.EXPO_PUBLIC_REVENUECAT_IOS_KEY),
+    "Only an Apple public SDK key may enter the app");
+  return { ...env, ...values, EXPO_PUBLIC_PURCHASES_ENABLED: "true" };
+}

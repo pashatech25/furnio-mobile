@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync} from 'node:fs';
+import {withNativeAuthRedirects} from './native-auth-redirects.mjs';
 const mode=process.argv[2];assert.equal(process.argv.length,3);
 assert(['--inspect','--configure-callbacks','--prepare-support-secret','--activity-read'].includes(mode));
 const root='/Users/alipashaamidi/Dev/Furnio Mobile';
@@ -26,12 +27,11 @@ if(mode==='--activity-read'){
  const v=await api('config/auth');console.log({nativeRedirects:(v.uri_allow_list??'').split(',').filter(u=>u.startsWith('furnio:')),appleEnabled:v.external_apple_enabled,appleAudience:v.external_apple_client_id,googleEnabled:v.external_google_enabled});
 }else if(mode==='--configure-callbacks'){
  const before=await api('config/auth');writeFileSync(`${root}/output/production-auth-before-native.json`,JSON.stringify(before),{mode:0o600});
- const redirects=new Set((before.uri_allow_list??'').split(',').filter(Boolean));for(const uri of ['furnio://auth/callback','furnio://auth/callback?type=recovery','furnio://auth/deletion-callback'])redirects.add(uri);
  const audiences=new Set((before.external_apple_client_id??'').split(',').filter(Boolean));audiences.add('ai.furnio.app');
- const patch={uri_allow_list:[...redirects].join(','),external_apple_enabled:true,external_apple_client_id:[...audiences].join(',')};
+ const patch={uri_allow_list:withNativeAuthRedirects(before.uri_allow_list),external_apple_enabled:true,external_apple_client_id:[...audiences].join(',')};
  const r=await fetch(`https://api.supabase.com/v1/projects/${ref}/config/auth`,{method:'PATCH',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(patch),redirect:'error',signal:AbortSignal.timeout(20000)});assert(r.ok,`Native callback update failed (${r.status})`);await r.body?.cancel();
  const after=await api('config/auth');for(const [k,v]of Object.entries(before))if(!(k in patch))assert.deepEqual(after[k],v,`Unexpected unrelated Auth change: ${k}`);for(const[k,v]of Object.entries(patch))assert.deepEqual(after[k],v);
- console.log('Added three native callback URLs and native Apple audience. All previous redirects, Google settings, SMTP, SMS, CAPTCHA and Auth limits verified unchanged. No account created.');
+ console.log('Added scoped native callback URLs and native Apple audience. All previous redirects, Google settings, SMTP, SMS, CAPTCHA and Auth limits verified unchanged. No account created.');
 }else{
  const keys=await api('api-keys');assert(Array.isArray(keys));const key=keys.find(k=>k.type==='secret'&&k.api_key?.startsWith('sb_secret_'));assert(key,'No existing modern server key available');
  const path='.env.production-mobile-server.local';assert.equal(spawnSync('git',['check-ignore','-q',path],{cwd:root}).status,0);

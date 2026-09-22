@@ -5,7 +5,7 @@ import * as Crypto from "expo-crypto";
 import { z } from "zod";
 import { config, demo } from "../config";
 import { Button, Notice } from "../ui";
-import { allowChallengeNavigation } from "./challenge-navigation";
+import { allowChallengeMessageSource, allowChallengeNavigation } from "./challenge-navigation";
 const message = z
   .object({
     type: z.literal("furnio.turnstile"),
@@ -73,11 +73,7 @@ export function Challenge({
           onMessage={(event) => {
             // No credentials enter this browser. Only the owned challenge document may return a bounded token.
             try {
-              const origin = new URL(event.nativeEvent.url);
-              if (
-                origin.origin !== url.origin ||
-                origin.pathname !== url.pathname
-              )
+              if (!allowChallengeMessageSource(url.href, event.nativeEvent.url, Platform.OS))
                 return;
               const payload: unknown = JSON.parse(event.nativeEvent.data);
               if (payload && typeof payload === "object" && "type" in payload &&

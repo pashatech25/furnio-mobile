@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NativeDatabase, storeEnvironment } from "./native-events";
+import { NativeDatabase, customerStoreContext, nativeCommerceReadiness } from "./native-events";
 import { HttpError } from "./http";
 
 const subscription = z.object({
@@ -47,16 +47,37 @@ export async function getMobileBilling(userId: string, url: URL, env: Env) {
     .safeParse(url.searchParams.get("store"));
   if (!store.success)
     throw new HttpError(400, "Select the native store for this device.");
-  const result = await new NativeDatabase(env).rpc(
+  const database = new NativeDatabase(env);
+  const context = await customerStoreContext(userId, env, database);
+  const result = context.enrolled ? await database.rpc("get_native_sandbox_billing", { p_user: userId }, billingSnapshot) : await database.rpc(
     "get_mobile_billing_snapshot",
     {
       p_user: userId,
-      p_environment: storeEnvironment(env),
+      p_environment: context.environment,
       p_store: store.data,
     },
     billingSnapshot,
   );
-  // The schema flag is necessary but not sufficient. Web/Admin subscription
-  // compatibility, restore and payment gates are still mandatory before sales.
-  return { ...result, acquisitionEnabled: false };
+  // Sandbox receipts must never replace the customer's shared real-money
+  // balance/history. Keep test accounting separate from the account summary.
+  const real = context.enrolled ? await database.rpc(
+    "get_mobile_billing_snapshot",
+    { p_user: userId, p_environment: "PRODUCTION", p_store: store.data },
+    billingSnapshot,
+  ) : result;
+  return {
+    ...result,
+    balance: real.balance,
+    subscription: real.subscription,
+    subscriptions: real.subscriptions,
+    subscriptionConflict: real.subscriptionConflict,
+    transactions: real.transactions,
+    ...(context.enrolled ? { sandbox: {
+      balance: result.balance,
+      subscriptions: result.subscriptions,
+      transactions: result.transactions,
+    } } : {}),
+    acquisitionEnabled: result.acquisitionEnabled &&
+      store.data === "APP_STORE" && nativeCommerceReadiness(env).commerceReady,
+  };
 }

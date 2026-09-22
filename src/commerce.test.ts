@@ -16,6 +16,9 @@ const calls = vi.hoisted(() => ({
   journal: vi.fn(),
   save: vi.fn(),
   clear: vi.fn(),
+  info: vi.fn(),
+  products: vi.fn(),
+  refund: vi.fn(),
 }));
 vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 vi.mock("./config", () => ({ config: { mode: "staging" }, demo: false }));
@@ -47,6 +50,7 @@ vi.mock("react-native-purchases", () => ({
     PRODUCT_ALREADY_PURCHASED_ERROR: "6",
   },
   PRODUCT_CATEGORY: { SUBSCRIPTION: "subscription", NON_SUBSCRIPTION: "pack" },
+  REFUND_REQUEST_STATUS: { SUCCESS: "success", USER_CANCELLED: "cancelled", ERROR: "error" },
   default: {
     isConfigured: async () => current.configured,
     configure: ({ appUserID }: { appUserID: string }) => {
@@ -59,6 +63,9 @@ vi.mock("react-native-purchases", () => ({
     },
     restorePurchases: calls.restore,
     purchaseStoreProduct: calls.purchase,
+    getCustomerInfo: calls.info,
+    getProducts: calls.products,
+    beginRefundRequestForProduct: calls.refund,
   },
 }));
 beforeEach(() => {
@@ -81,6 +88,76 @@ beforeEach(() => {
   calls.journal.mockReset().mockResolvedValue(null);
   calls.save.mockReset().mockResolvedValue(undefined);
   calls.clear.mockReset().mockResolvedValue(undefined);
+  calls.info.mockReset().mockResolvedValue({ allPurchasedProductIdentifiers: ["pack20"] });
+  calls.products.mockReset().mockResolvedValue([{ identifier: "pack20" }]);
+  calls.refund.mockReset().mockResolvedValue("success");
+});
+
+describe("Apple product catalog", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("EXPO_PUBLIC_PURCHASES_ENABLED", "true");
+    current.commerce = true;
+  });
+  it("loads subscriptions and packs without requiring purchase history", async () => {
+    calls.info.mockRejectedValue(new Error("History unavailable"));
+    calls.products.mockImplementation(async (ids: string[]) => ids.map(identifier => ({ identifier })));
+    const { loadStoreProducts } = await import("./commerce");
+    expect(await loadStoreProducts(current.user, [
+      { productId: "monthly", interval: "month" },
+      { productId: "pack50", interval: "one_time" },
+    ])).toEqual([{ identifier: "monthly" }, { identifier: "pack50" }]);
+    expect(calls.products).toHaveBeenCalledWith(["monthly"], "subscription");
+    expect(calls.products).toHaveBeenCalledWith(["pack50"], "pack");
+    expect(calls.info).not.toHaveBeenCalled();
+    expect(calls.purchase).not.toHaveBeenCalled();
+  });
+  it("does not invent prices when Apple returns no products", async () => {
+    calls.products.mockResolvedValue([]);
+    const { loadStoreProducts } = await import("./commerce");
+    expect(await loadStoreProducts(current.user, [{ productId: "pack50", interval: "one_time" }])).toEqual([]);
+  });
+});
+
+describe("Apple refund requests", () => {
+  beforeEach(() => vi.resetModules());
+  const product = { identifier: "pack20" } as PurchasesStoreProduct;
+  it("opens Apple support while new purchases are disabled without granting or reclaiming credits", async () => {
+    const { requestAppleRefund } = await import("./commerce");
+    await expect(requestAppleRefund(current.user, product)).resolves.toBe("submitted");
+    expect(calls.refund).toHaveBeenCalledWith(product);
+    expect(calls.purchase).not.toHaveBeenCalled();
+    expect(calls.api.mock.calls.every(([path]) => path === "/v1/capabilities")).toBe(true);
+  });
+  it("distinguishes a cancelled sheet from a submitted request", async () => {
+    calls.refund.mockResolvedValue("cancelled");
+    const { requestAppleRefund } = await import("./commerce");
+    await expect(requestAppleRefund(current.user, product)).resolves.toBe("cancelled");
+  });
+  it("rejects a product absent from this account's store history", async () => {
+    calls.info.mockResolvedValue({ allPurchasedProductIdentifiers: [] });
+    const { requestAppleRefund } = await import("./commerce");
+    await expect(requestAppleRefund(current.user, product)).rejects.toThrow("not linked");
+    expect(calls.refund).not.toHaveBeenCalled();
+  });
+  it("rejects an account switch while history loads", async () => {
+    calls.info.mockImplementation(async () => {
+      current.user = "00000000-0000-4000-8000-000000000002";
+      return { allPurchasedProductIdentifiers: ["pack20"] };
+    });
+    const { requestAppleRefund } = await import("./commerce");
+    await expect(requestAppleRefund(current.user, product)).rejects.toThrow("account changed");
+    expect(calls.refund).not.toHaveBeenCalled();
+  });
+  it("loads only previously purchased catalog products", async () => {
+    const { loadRefundProducts } = await import("./commerce");
+    const products = await loadRefundProducts(current.user, [
+      { productId: "pack20", interval: "one_time" },
+      { productId: "unowned", interval: "month" },
+    ]);
+    expect(products).toEqual([product]);
+    expect(calls.products).toHaveBeenCalledExactlyOnceWith(["pack20"], "pack");
+  });
 });
 
 describe("one-shot native purchase launch and durable recovery", () => {

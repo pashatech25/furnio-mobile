@@ -387,7 +387,7 @@ export class RevenueCatVerifier {
         product.store_identifier !== event.product_id ||
         product.app_id !== event.app_id ||
         !this.config.appIds.includes(product.app_id) ||
-        product.type !== "one_time"
+        !["one_time", "consumable"].includes(product.type)
       )
         throw new HttpError(
           409,

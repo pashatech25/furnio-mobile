@@ -1,6 +1,21 @@
 # Shared-account deletion — implementation and safety record
 
-Updated 9 September 2026. **The complete deletion workflow is not implemented or enabled.** Account privacy screens, isolated same-account reauthentication, durable native receipts, account fencing and bounded media cleanup are implemented locally. Identity/provider revocation, personal-record cleanup, retention and completion remain. The screen explains the disabled deletion gate. Do not submit the app while it cannot initiate full account deletion.
+## Current production checkpoint — 12 September 2026
+
+**In-app deletion request intake is enabled; automatic permanent cleanup is not.** The app supports same-account recent reauthentication, review, preparation, explicit confirmation and a durable signed-out status receipt. It tells customers that cleanup is pending, completion takes up to 30 days and confirmation goes to their account email. Accepted requests still require the operational/manual deletion process; a queued receipt is not proof of permanent erasure. `MOBILE_ACCOUNT_CLEANUP_ENABLED` and `MOBILE_ACCOUNT_AUTH_BLOCK_ENABLED` remain false.
+
+Two production defects were repaired without changing website login or processing:
+
+- Added only `furnio://auth/deletion-callback?flow=*` to the existing Auth redirect allowlist. Existing website/native callbacks and all other Auth settings were preserved. Actual OAuth callback routing now retains the native flow instead of falling back to the website.
+- Updated the mobile support Worker's rejected Supabase server credential to the current valid production credential. No verifier relaxation, RLS change or processing-Worker deployment. The older ignored mobile-server environment file must not be used to overwrite this repaired secret.
+
+Verified against production with one empty synthetic QA account: review 200, preparation 200, confirmation queued, duplicate confirmation same receipt, signed-out status 200 and wrong receipt secret 404. Removed that synthetic account and its exact request afterward. No customer or reviewer account was submitted for deletion. Physical Google reauthentication/recording remains a separate owner acceptance check after installing build 4.
+
+Apple documents that manual/asynchronous deletion is acceptable when the expected duration is disclosed and completion is confirmed: https://developer.apple.com/support/offering-account-deletion-in-your-app/ . This does not waive the requirement to actually complete accepted requests.
+
+## Historical implementation notes (superseded where noted above)
+
+9 September 2026: account privacy screens, isolated same-account reauthentication, durable native receipts, account fencing and bounded media cleanup were implemented locally; full automatic identity/provider revocation, personal-record cleanup and completion were unfinished.
 
 **Owner policy clarification — 10 September 2026:** retain payment records for **seven years**, for legal and tax purposes. This supersedes the earlier “payment period unknown” notes below. It does not authorize retaining unrelated photos, marketing data or complete profiles for seven years. Backup retention and restore-time deletion handling still require verification. No production deletion gate was enabled by this policy clarification.
 

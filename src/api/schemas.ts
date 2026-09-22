@@ -109,6 +109,7 @@ export const mobileBillingSchema = z.object({
     .optional(),
   subscriptionConflict: z.boolean().optional(),
   acquisitionEnabled: z.boolean().optional(),
+  sandbox: z.object({ balance: z.number().int().nonnegative() }).optional(),
   products: z.array(
     z.object({
       productId: z.string(),

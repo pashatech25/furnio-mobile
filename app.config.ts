@@ -11,7 +11,7 @@ const config: ExpoConfig = {
   backgroundColor: "#f7f5ef",
   ios: {
     bundleIdentifier: "ai.furnio.app",
-    buildNumber: "2",
+    buildNumber: "4",
     appleTeamId: "5SY24C9RBH",
     supportsTablet: true,
     usesAppleSignIn: true,

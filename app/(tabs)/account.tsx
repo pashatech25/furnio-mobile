@@ -207,7 +207,7 @@ export default function Account() {
           onPress={() => void Linking.openURL("https://furnio.ai/terms")}
         />
         <Button
-          title="Account privacy & deletion"
+          title="Delete account"
           secondary
           onPress={() => router.push("/account-deletion")}
         />

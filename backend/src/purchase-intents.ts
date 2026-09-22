@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { boundedBytes, HttpError } from "./http";
-import { NativeDatabase, nativeConfiguration } from "./native-events";
+import { NativeDatabase, nativeConfiguration, nativeCommerceReadiness, customerStoreContext } from "./native-events";
 import { checkSdkCancellation } from "./checkout-cancellation";
 
 const store = z.enum(["APP_STORE", "PLAY_STORE"]);
@@ -49,12 +49,7 @@ async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
   return parsed.data;
 }
 function requireAcquisition(env: Env) {
-  // An independent deployment gate; commerceReady remains false until every
-  // release gate is met, even if a staging operator tests these endpoints.
-  if (
-    env.MOBILE_ENABLED !== "true" ||
-    env.NATIVE_ACQUISITION_ENABLED !== "true"
-  )
+  if (!nativeCommerceReadiness(env).commerceReady)
     throw new HttpError(503, "New store purchases are not enabled.");
 }
 export async function purchaseEligibility(
@@ -75,6 +70,12 @@ export async function purchaseEligibility(
       })
       .strict(),
   );
+  if (body.store !== "APP_STORE")
+    throw new HttpError(503, "New purchases are enabled only for the Apple app.");
+  const context = await customerStoreContext(userId, env, database);
+  if (context.enrolled) return database.rpc("manage_native_sandbox_checkout", {
+    p_user: userId, p_action: "begin", p_request: body.requestId, p_product: body.productId,
+  }, eligibilityResult);
   const hash = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(JSON.stringify([body.store, body.productId])),
@@ -111,8 +112,11 @@ export async function purchaseIntent(
     p_environment: config.environment,
     p_intent: id,
   };
+  const context = await customerStoreContext(userId, env, database);
   if (request.method === "GET")
-    return database.rpc("read_native_purchase_intent", base, intentStatus);
+    return context.enrolled
+      ? database.rpc("manage_native_sandbox_checkout", { p_user: userId, p_intent: id, p_action: "read" }, intentStatus)
+      : database.rpc("read_native_purchase_intent", base, intentStatus);
   const body = await readBody(
     request,
     z.discriminatedUnion("action", [
@@ -131,8 +135,22 @@ export async function purchaseIntent(
       z.object({ action: z.literal("store_cancelled") }).strict(),
     ]),
   );
+  if (context.enrolled) {
+    if (body.action === "launch") {
+      requireAcquisition(env);
+      if (body.store !== "APP_STORE") throw new HttpError(503, "Only Apple sandbox checkout is supported.");
+    }
+    if (body.action === "store_cancelled") await checkSdkCancellation(userId, id, env, database);
+    return database.rpc("manage_native_sandbox_checkout", {
+      p_user: userId, p_intent: id,
+      p_action: body.action === "store_cancelled" ? "read" : body.action,
+      ...(body.action === "report" ? { p_hint: body.transactionId } : {}),
+    }, intentStatus);
+  }
   if (body.action === "launch") {
     requireAcquisition(env);
+    if (body.store !== "APP_STORE")
+      throw new HttpError(503, "New purchases are enabled only for the Apple app.");
     const launched = await database.rpc(
       "launch_customer_purchase_intent",
       { ...base, p_provider: body.store },
@@ -182,6 +200,13 @@ export async function recoverPurchaseSelection(
     request,
     z.object({ store, requestId: z.uuid() }).strict(),
   );
+  const context = await customerStoreContext(userId, env, database);
+  if (context.enrolled) {
+    if (body.store !== "APP_STORE") throw new HttpError(400, "Only Apple sandbox checkout is supported.");
+    return database.rpc("manage_native_sandbox_checkout", {
+      p_user: userId, p_action: "recover", p_request: body.requestId,
+    }, z.union([intentStatus, z.object({ intentId: z.null(), status: z.literal("not_found") })]));
+  }
   return database.rpc(
     "recover_native_purchase_selection",
     {

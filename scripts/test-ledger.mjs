@@ -100,6 +100,7 @@ try {
   }
   sql(readFileSync(resolve(main,'supabase/migrations/20260909193514_mobile_account_automation_fence.sql'),'utf8'));
   sql(readFileSync(resolve(main,'supabase/migrations/20260909213457_native_automation_customer_billing.sql'),'utf8'));
+  sql(readFileSync(resolve(main,'supabase/migrations/20260915212218_native_account_deletion_billing.sql'),'utf8'));
   const currentTrigger = sql("select pg_get_functiondef('private.track_subscription_credit_ledger()'::regprocedure)");
   assert.ok(currentTrigger.includes("elsif new.reason = 'native_refund'"), 'Native-specific Stripe compatibility branch');
   sql(readFileSync(resolve(root,'backend/tests/ledger-cases.sql'),'utf8'));

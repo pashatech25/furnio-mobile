@@ -11,7 +11,7 @@ import Svg, { Circle, Path, Rect } from "react-native-svg";
 import Slider from "@react-native-community/slider";
 import { ImageManipulator } from "expo-image-manipulator";
 import { Body, Button, colors, Field, Label, Notice, styles } from "../ui";
-import { pathFor, type Stroke } from "./geometry";
+import { pathFor, strokeBounds, type Stroke } from "./geometry";
 import { createViewportGesture, initialViewport } from "./mask-viewport";
 import type { LocalPhoto } from "../media";
 import {
@@ -208,6 +208,12 @@ export const MaskEditor = forwardRef<
               {index === active &&
                 drawing &&
                 strokes([drawing], palette[index]!)}
+              {(() => {
+                const selected = index === active && drawing ? [...region.strokes, drawing] : region.strokes;
+                if (!selected.some(stroke => stroke.points.length)) return null;
+                const box = strokeBounds(selected, width, height);
+                return <Rect x={box.x * width} y={box.y * height} width={box.width * width} height={box.height * height} fill="none" stroke={palette[index]!} strokeWidth={Math.max(3, width / 400)} />;
+              })()}
             </React.Fragment>
           ))}
         </Svg>
@@ -334,6 +340,7 @@ export const MaskEditor = forwardRef<
           )
         }
       />
+      <Body>Each outlined frame is editable. Use a separate region for each object. All regions are processed in one request; areas outside the frames are preserved.</Body>
       <Button
         secondary
         title="Add another region"

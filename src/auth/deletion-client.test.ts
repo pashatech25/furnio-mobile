@@ -39,6 +39,7 @@ vi.mock("expo-crypto", () => ({
   digestStringAsync: async () => "hashed-nonce",
 }));
 vi.mock("expo-linking", () => ({
+  addEventListener: vi.fn(() => ({ remove: vi.fn() })),
   createURL: (path: string, options: { queryParams: Record<string, string> }) =>
     `furnio://${path}?${new URLSearchParams(options.queryParams)}`,
 }));
@@ -48,6 +49,7 @@ vi.mock("expo-apple-authentication", () => ({
   signInAsync: fixture.apple,
 }));
 import { createNativeDeletionReauthentication } from "./deletion-client";
+import { finishDeletionCallback } from "./deletion-callback";
 const user = "11111111-1111-4111-8111-111111111111",
   other = "22222222-2222-4222-8222-222222222222";
 const sid = "33333333-3333-4333-8333-333333333333",
@@ -158,6 +160,17 @@ describe("actual native Supabase privacy adapter", () => {
       createNativeDeletionReauthentication(user).signIn("google"),
     ).rejects.toThrow();
     expect(fixture.temp.exchangeCodeForSession).not.toHaveBeenCalled();
+  });
+  it("lets Android's late-mounted return screen complete the same isolated exchange once", async () => {
+    fixture.mode.OS = "android";
+    const flow = createNativeDeletionReauthentication(user);
+    await flow.signIn("google");
+    const callback = `${fixture.redirect}&code=fixture-code&sb_flow_id=fixture-pkce`;
+    await finishDeletionCallback(callback);
+    expect(fixture.temp.exchangeCodeForSession).toHaveBeenCalledOnce();
+    expect(fixture.main.setSession).not.toHaveBeenCalled();
+    await flow.dispose();
+    await expect(finishDeletionCallback(callback)).rejects.toThrow("expired");
   });
   it("cancels OAuth without touching the main session", async () => {
     fixture.browser.mockResolvedValue({ type: "cancel" });

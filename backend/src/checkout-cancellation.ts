@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NativeDatabase, nativeConfiguration } from "./native-events";
+import { NativeDatabase, nativeConfiguration, customerStoreContext } from "./native-events";
 import { RevenueCatVerifier } from "./revenuecat";
 
 const claimSchema = z
@@ -23,13 +23,14 @@ export async function checkSdkCancellation(
   verifier?: Pick<RevenueCatVerifier, "hasCancellationConflict">,
 ) {
   const config = nativeConfiguration(env);
+  const context = await customerStoreContext(userId, env, database);
   const base = {
     p_user: userId,
-    p_environment: config.environment,
+    p_environment: context.environment,
     p_intent: intentId,
   };
   const claim = await database.rpc(
-    "claim_native_checkout_cancellation",
+    context.enrolled ? "claim_sandbox_checkout_cancellation" : "claim_native_checkout_cancellation",
     base,
     claimSchema,
   );
@@ -46,7 +47,7 @@ export async function checkSdkCancellation(
       });
     observation = (await trusted.hasCancellationConflict({
       userId,
-      environment: config.environment,
+      environment: context.environment,
       store: claim.store,
       kind: claim.kind,
       launchedAt: claim.launchedAt,
@@ -58,7 +59,7 @@ export async function checkSdkCancellation(
     // An unavailable check cannot release the intent. A retry needs a new lease.
   }
   await database.rpc(
-    "finish_native_checkout_cancellation",
+    context.enrolled ? "finish_sandbox_checkout_cancellation" : "finish_native_checkout_cancellation",
     {
       ...base,
       p_lease: claim.leaseId,

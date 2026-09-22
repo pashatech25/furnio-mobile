@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { HttpError, boundedJson } from "./http";
-import { receiveNativeWebhook, consumeNativeEvents } from "./native-events";
+import { receiveNativeWebhook, consumeNativeEvents, nativeCommerceReadiness } from "./native-events";
 import { getMobileBilling } from "./billing";
 import { getActivity } from "./activity";
 import { processAccountMediaCleanup } from "./account-media-cleanup";
@@ -173,7 +173,7 @@ export default {
             env.MOBILE_ACCOUNT_REQUESTS_ENABLED === "true" &&
             accountPrivacyLimitsReady(env),
           notificationsReady: notificationsReady(env),
-          recoveryReady: env.NATIVE_RECONCILIATION_ENABLED === "true",
+          ...nativeCommerceReadiness(env),
           billingReady:
             env.MOBILE_ENABLED === "true" &&
             env.MOBILE_BILLING_READ_ENABLED === "true",
@@ -213,7 +213,9 @@ export default {
       )
         // Paid-event processing is deliberately independent of the app entry/
         // acquisition flag so rollback does not abandon paid transactions.
-        response = json(await receiveNativeWebhook(request, env), 202);
+        // RevenueCat requires HTTP 200 after durable inbox/queue acceptance.
+        // Processing still happens asynchronously; a failed enqueue must retry.
+        response = json(await receiveNativeWebhook(request, env), 200);
       else if (
         ["POST", "GET"].includes(request.method) &&
         url.pathname === "/v1/purchases/reconcile"

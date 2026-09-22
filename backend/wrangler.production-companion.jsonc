@@ -8,7 +8,8 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [
-    {"pattern": "mobile-api.furnio.ai", "custom_domain": true}
+    {"pattern": "mobile-api.furnio.ai", "custom_domain": true},
+    {"pattern": "furnio.ai/v1/challenge", "zone_name": "furnio.ai"}
   ],
   "observability": {"enabled": true, "redact_query_string": true, "logs": {"enabled": true, "invocation_logs": false}},
   "vars": {
@@ -16,10 +17,10 @@
     "SUPABASE_URL": "https://sgsjkgfwgxmlqcgyuyeh.supabase.co",
     "SUPABASE_PROJECT_REF": "sgsjkgfwgxmlqcgyuyeh",
     "MOBILE_ENABLED": "true",
-    "MOBILE_BILLING_READ_ENABLED": "false",
+    "MOBILE_BILLING_READ_ENABLED": "true",
     "MOBILE_ACTIVITY_READ_ENABLED": "true",
-    "NATIVE_RECONCILIATION_ENABLED": "false",
-    "NATIVE_ACQUISITION_ENABLED": "false",
+    "NATIVE_RECONCILIATION_ENABLED": "true",
+    "NATIVE_ACQUISITION_ENABLED": "true",
     "MOBILE_NOTIFICATIONS_ENABLED": "false",
     "MOBILE_ACCOUNT_REVIEW_ENABLED": "true",
     "MOBILE_ACCOUNT_REQUESTS_ENABLED": "true",
@@ -27,8 +28,8 @@
     "MOBILE_ACCOUNT_AUTH_BLOCK_ENABLED": "false",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAEhr66dsL3Z-R16K",
     "CHALLENGE_HOSTNAME": "mobile-api.furnio.ai",
-    "REVENUECAT_PROJECT_ID": "",
-    "REVENUECAT_APP_IDS": "",
+    "REVENUECAT_PROJECT_ID": "7d9afb63",
+    "REVENUECAT_APP_IDS": "app7734690df5",
     "EXPO_PROJECT_ID": ""
   },
   "secrets": {"required": ["SUPABASE_SERVICE_ROLE_KEY", "ACCOUNT_DELETION_LIMIT_SECRET"]},
@@ -37,5 +38,16 @@
     {"name": "ACCOUNT_DELETION_USER_LIMIT", "namespace_id": "2026091002", "simple": {"limit": 10, "period": 60}},
     {"name": "ACCOUNT_DELETION_RECEIPT_LIMIT", "namespace_id": "2026091003", "simple": {"limit": 12, "period": 60}}
   ],
-  "services": [{"binding": "PLATFORM", "service": "virtual-staging-api"}]
+  "services": [{"binding": "PLATFORM", "service": "virtual-staging-api"}],
+  "queues": {
+    "producers": [{"binding": "NATIVE_EVENTS", "queue": "furnio-mobile-native-events"}],
+    "consumers": [{
+      "queue": "furnio-mobile-native-events",
+      "max_batch_size": 1,
+      "max_batch_timeout": 1,
+      "max_retries": 10,
+      "retry_delay": 60,
+      "dead_letter_queue": "furnio-mobile-native-events-dlq"
+    }]
+  }
 }

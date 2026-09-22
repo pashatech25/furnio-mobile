@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Modal, Pressable, View } from "react-native";
+import { Image, Pressable, View } from "react-native";
 import { ProcessingAnimation } from "../../src/ProcessingAnimation";
 import { AI_PROCESSING_DISCLOSURE, AI_PROCESSING_CONFIRM_LABEL } from "../../src/ai-processing-disclosure";
 import { router, useLocalSearchParams } from "expo-router";
@@ -204,7 +204,7 @@ export default function Studio() {
       void discardDraft(owner, receipt.service).catch(() => undefined);
       router.replace({
         pathname: "/result/[jobId]",
-        params: { jobId: result.jobId, projectId: receipt.projectId },
+        params: { jobId: result.jobId, projectId: receipt.projectId, service: receipt.service },
       });
     } catch (error) {
       if (operation && !operation.current) return;
@@ -428,7 +428,7 @@ export default function Studio() {
       if (demo) {
         router.push({
           pathname: "/result/[jobId]",
-          params: { jobId: demoJobId, previewProcessing: "1", projectId },
+          params: { jobId: demoJobId, previewProcessing: "1", projectId, service: service.id },
         });
         return;
       }
@@ -553,7 +553,7 @@ export default function Studio() {
       void app.refresh();
       router.push({
         pathname: "/result/[jobId]",
-        params: { jobId: job.jobId, projectId },
+        params: { jobId: job.jobId, projectId, service: service.id },
       });
     } catch (error) {
       if (
@@ -645,14 +645,14 @@ export default function Studio() {
       />
       }
       title={service.name}
-      right={<Pill>{app.billing?.balance ?? "—"} credits</Pill>}
-    >
-      <TrialAllowance />
-      <Modal visible={busy} transparent animationType="fade" onRequestClose={() => {}}>
+      overlay={busy ? (
         <View style={{ flex: 1, backgroundColor: "#111d17f5", justifyContent: "center", padding: 24 }}>
           <ProcessingAnimation label="Preparing and submitting your photo…" />
         </View>
-      </Modal>
+      ) : undefined}
+      right={<Pill>{app.billing?.balance ?? "—"} credits</Pill>}
+    >
+      <TrialAllowance />
       <View accessibilityLabel={files.length ? "Photo selected. Set your direction, then confirm." : "Choose a photo, set your direction, then confirm."} style={{ flexDirection: "row", gap: 7 }}>
         {[0, 1, 2].map(index => <View key={index} style={{ flex: 1, height: 3, borderRadius: 4, backgroundColor: index === 0 || (index === 1 && files.length > 0) ? colors.ink : colors.line }} />)}
       </View>

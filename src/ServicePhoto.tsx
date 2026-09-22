@@ -39,7 +39,7 @@ export function ServicePhoto({ service, credits, compact = false, locked = false
     {locked ? <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
       <Defs><Filter id="trialGray"><FeColorMatrix type="saturate" values="0" /></Filter></Defs>
       <SvgImage href={service.image} width="100%" height="100%" preserveAspectRatio="xMidYMid slice" filter="url(#trialGray)" />
-    </Svg> : <Image source={service.image} style={StyleSheet.absoluteFill} />}
+    </Svg> : <Image source={service.image} resizeMode="cover" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />}
     {!locked && service.id === "reference_furniture" && <ReferencePreview />}
     {!locked && videos[service.id] !== undefined && <Motion source={videos[service.id]!} />}
     <Svg pointerEvents="none" width="100%" height="100%" style={StyleSheet.absoluteFill}>

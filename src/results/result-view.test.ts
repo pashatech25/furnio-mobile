@@ -7,12 +7,13 @@ import {
   comparisonSource,
   createResultRequestGate,
   resultLabel,
-  resultOutputs,
+  resultOutputs as outputsForService,
   selectedResult,
   type ResultOutput,
 } from "./result-view";
 
 const now = Date.parse("2026-09-09T12:00:00Z");
+const resultOutputs = (value: JobStatusResponse | null) => outputsForService(value, "multiview");
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const output = (view: number, stepIndex: number): ResultOutput => ({
@@ -41,6 +42,22 @@ const job = (results: ResultOutput[] = []): JobStatusResponse =>
   });
 
 describe("native per-output result presentation", () => {
+  it.each(["custom_staging", "item_removal"])("shows only the final %s image and its original", (service) => {
+    const raw = { ...job([output(1, 0), output(2, 1)]), status: "succeeded" as const };
+    const results = outputsForService(raw, service);
+    expect(results).toHaveLength(1);
+    expect(results[0].assetId).toBe(raw.resultAssetId);
+    expect(results[0].resultUrl).toBe(raw.resultUrl);
+    expect(results[0].source).toEqual(raw.results![1].source);
+  });
+  it.each(["queued", "running", "partial", "failed", "cancelled"] as const)("never offers unfinished mask steps as final images: %s", (status) => {
+    expect(outputsForService({ ...job([output(1, 0)]), status }, "custom_staging")).toEqual([]);
+  });
+  it("uses the final protected trial preview without a clean-master fallback", () => {
+    const raw = { ...job([output(1, 0), output(2, 1)]), status: "succeeded" as const, accessLevel: "trial_locked" as const };
+    expect(outputsForService(raw, "item_removal")[0].resultUrl).toBe(raw.previewUrl);
+    expect(outputsForService({ ...raw, previewUrl: null }, "item_removal")[0].resultUrl).toBeNull();
+  });
   it("sorts known view numbers without confusing anchor-first processing order", () => {
     const raw = job([output(2, 0), output(1, 1), output(3, 2)]);
     const results = resultOutputs(raw);

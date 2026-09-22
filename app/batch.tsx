@@ -771,7 +771,7 @@ export default function Batch() {
               onPress={() =>
                 router.push({
                   pathname: "/result/[jobId]",
-                  params: { jobId: state.jobId!, projectId },
+                  params: { jobId: state.jobId!, projectId, service },
                 })
               }
             />

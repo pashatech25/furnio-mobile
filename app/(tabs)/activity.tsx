@@ -122,6 +122,7 @@ export default function Activity() {
               pathname: "/result/[jobId]",
               params: {
                 jobId: job.id,
+                service: job.featureSlug,
                 ...(job.projectId ? { projectId: job.projectId } : {}),
               },
             })

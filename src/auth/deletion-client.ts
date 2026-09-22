@@ -2,7 +2,7 @@ import { createClient, type Session, type User } from "@supabase/supabase-js";
 import * as Apple from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
-import * as WebBrowser from "expo-web-browser";
+import { openNativeAuthSession } from "./browser-session";
 import { Platform } from "react-native";
 import { z } from "zod";
 import { config, demo } from "../config";
@@ -185,7 +185,7 @@ function isolated(): IsolatedDeletionSignIn {
           });
           if (result.error || !result.data.url || disposed)
             throw new Error("Google verification could not start.");
-          const browser = await WebBrowser.openAuthSessionAsync(
+          const browser = await openNativeAuthSession(
             result.data.url,
             redirectTo,
           );
@@ -196,8 +196,14 @@ function isolated(): IsolatedDeletionSignIn {
               "Verification cancelled. Your account has not been changed.",
             );
         } finally {
-          unregister?.();
-          unregister = null;
+          // Android's deep-link route mounts after the browser promise settles.
+          // Keep this exact-flow, deduplicated handler until proof disposal so
+          // that route can finish returning to the still-open private review.
+          // iOS retains its existing browser-session lifecycle unchanged.
+          if (Platform.OS !== "android") {
+            unregister?.();
+            unregister = null;
+          }
         }
       }
       if (disposed) {
